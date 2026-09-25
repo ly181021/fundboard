@@ -1,6 +1,5 @@
 {
   "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "apiKey": "在这里填入你的阿里云 DashScope API Key（sk-开头）",
-  "model": "qwen-vl-max",
-  "enableThinking": false
+  "model": "qwen-vl-max"
 }
