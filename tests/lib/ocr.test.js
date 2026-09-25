@@ -38,7 +38,13 @@ test('loadOcrConfig：无文件走环境变量；key 缺失视为未配置', asy
     configPath: join(tmpdir(), 'not-exist-ocr.json'),
     env: { OCR_API_BASE: 'http://y/v1', OCR_API_KEY: 'k', OCR_MODEL: 'm' },
   });
-  assert.deepEqual(r1, { baseUrl: 'http://y/v1', apiKey: 'k', model: 'm', analysis: null });
+  assert.deepEqual(r1, {
+    baseUrl: 'http://y/v1',
+    apiKey: 'k',
+    model: 'm',
+    analysis: null,
+    enableThinking: false, // 环境变量形态同样带默认值
+  });
 
   const dir = await mkdtemp(join(tmpdir(), 'ocr-'));
   try {
@@ -72,6 +78,7 @@ test('loadOcrConfig：analysis 段可只覆盖 model，其余回落顶层', asyn
       baseUrl: 'http://x/v1',
       apiKey: 'sk-1',
       model: 'deepseek-chat',
+      enableThinking: false, // 未配置时默认关思考区
     });
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -92,7 +99,12 @@ test('loadOcrConfig：analysis 段可换网关与 key（三要素全覆盖）', 
       }),
     );
     const c = await loadOcrConfig({ configPath: p });
-    assert.deepEqual(c.analysis, { baseUrl: 'http://z/v1', apiKey: 'sk-2', model: 'text-mini' });
+    assert.deepEqual(c.analysis, {
+      baseUrl: 'http://z/v1',
+      apiKey: 'sk-2',
+      model: 'text-mini',
+      enableThinking: false,
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
