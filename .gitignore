@@ -1,0 +1,5 @@
+data/
+node_modules/
+ocr.config.json
+Screenshot_*
+*.log
