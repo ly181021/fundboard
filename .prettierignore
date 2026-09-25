@@ -1,0 +1,47 @@
+# 依赖包
+node_modules/
+
+# 构建产物
+dist/
+build/
+out/
+coverage/
+
+# 缓存
+.npm
+.yarn
+.pnp
+.pnp.js
+
+# 日志
+*.log
+
+# 环境配置
+.env
+.env.local
+.env.*.local
+
+# 编辑器本地缓存
+.vscode/
+.idea/
+
+# 静态资源一般不格式化
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.svg
+*.mp4
+*.mp3
+*.woff
+*.woff2
+
+# 其他
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# CSS 按第三节行宽口径（120）手工排版，不交 prettier（printWidth 100）重排
+css/style.css

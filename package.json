@@ -1,0 +1,20 @@
+{
+  "name": "fundboard",
+  "version": "0.5.0",
+  "type": "module",
+  "description": "理财看板 - 基金行情、持仓与收益可视化",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "service:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restart-server.ps1",
+    "test": "node --test \"tests/**/*.test.js\""
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": true,
+    "tabWidth": 2,
+    "printWidth": 100
+  }
+}

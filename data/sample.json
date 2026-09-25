@@ -1,0 +1,34 @@
+{
+  "assets": [
+    {
+      "id": "fund_001",
+      "asset_type": "fund",
+      "name": "沪深300指数",
+      "code": "110020",
+      "snapshot": {
+        "hold_amount": 10500.00,
+        "pending_amount": 0.00,
+        "cost_price": 1.0500,
+        "hold_shares": 10000.00,
+        "total_invested": 10000.00
+      },
+      "transactions": [
+        { "type": "buy", "amount": 500.00, "shares": 476.19, "date": "2026-02-10" }
+      ]
+    },
+    {
+      "id": "fund_002",
+      "asset_type": "fund",
+      "name": "中证500",
+      "code": "161017",
+      "snapshot": {
+        "hold_amount": 7200.00,
+        "pending_amount": 0.00,
+        "cost_price": 1.2000,
+        "hold_shares": 6000.00,
+        "total_invested": 7200.00
+      },
+      "transactions": []
+    }
+  ]
+}
