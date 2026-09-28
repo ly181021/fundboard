@@ -73,10 +73,7 @@ html[data-theme="dark"] {
   --st-hold: #94a3b8;
   --st-watch: #e8c05a; --st-watch-ink: #e8c05a; --st-watch-bg: #2b2413; --st-watch-line: #5c4a12;
   --st-alert: #e8a35a; --st-alert-ink: #e8a35a; --st-alert-bg: #2b2013; --st-alert-line: #5c4412;
-    --st-tp: #f0b429;
-    --st-sl: #ff7875;
-    --st-add: #60a5fa;
-    --st-exit: #cbd5e1;
+  --st-tp: #f0b429; --st-sl: #ff7875; --st-add: #60a5fa; --st-exit: #cbd5e1;
 }
 /* 涨跌色预设覆盖（与主题正交；级联顺序写死） */
 html[data-updown="intl"] { --color-up: #389e0d; --color-down: #f5222d; }
@@ -221,14 +218,7 @@ body {
 .card-label { font-size: var(--fs-sm); color: var(--color-muted); }
 .card-value { font-size: 22px; font-weight: 600; margin-top: 4px; }
 .card-value.muted { color: var(--color-muted); }
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 0 0 8px;
-}
+.toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 0 0 8px; }
 /* 窄屏（排序组与操作组换行成两行）时给足行距，防止排序按钮与"本金/刷新行情"等操作元素贴叠 */
 @media (max-width: 560px) {
   .toolbar { row-gap: 10px; }
@@ -761,13 +751,7 @@ body {
   padding: 2px 4px;
 }
 .btn-mini:hover { text-decoration: underline; }
-.tx-table {
-  font-variant-numeric: tabular-nums;
-  box-shadow: none;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  margin-top: 4px;
-}
+.tx-table { font-variant-numeric: tabular-nums; box-shadow: none; border: 1px solid var(--color-border); border-radius: 6px; margin-top: 4px; }
 /* 窄屏：表格横向滚动，汇总卡两列换行 */
 .table-wrap { overflow-x: auto; }
 /* Chart.js 画布兜底：窗口变化未触发重绘时也不撑破容器（内联宽度被钳制） */
@@ -1049,10 +1033,7 @@ canvas { max-width: 100%; }
   --st-hold: #64748b;
   --st-watch: #d97706; --st-watch-ink: #b45309; --st-watch-bg: color-mix(in srgb, var(--st-watch) 10%, #fff); --st-watch-line: color-mix(in srgb, var(--st-watch) 34%, #fff);
   --st-alert: #ea580c; --st-alert-ink: #c2410c; --st-alert-bg: color-mix(in srgb, var(--st-alert) 10%, #fff); --st-alert-line: color-mix(in srgb, var(--st-alert) 34%, #fff);
-    --st-tp: #b45309;
-    --st-sl: #dc2626;
-    --st-add: #2563eb;
-    --st-exit: #1e293b;
+  --st-tp: #b45309; --st-sl: #dc2626; --st-add: #2563eb; --st-exit: #1e293b;
   /* 金色强调（配置弹窗提示/自定义 chip/计数等，原借用 --st-tp；七态换板后独立成 token，防色值随动） */
   --gold: #d48806;
   /* 雷达角标（主表预警列专用：黄/橙软底深字款，与 badge.watch/alert 同构。详情弹窗内 .sd-radar 为浅底款，见 sd-* 段） */
@@ -1062,15 +1043,8 @@ canvas { max-width: 100%; }
 .al { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; min-width: 128px; cursor: pointer; }
 .al-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 20px;
-    border-radius: 4px;
-    padding: 0 8px;
-    white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; line-height: 20px;
+  border-radius: 4px; padding: 0 8px; white-space: nowrap;
 }
 .badge.hold  { color: #fff; background: var(--st-hold); }
 .badge.watch { color: var(--st-watch-ink); background: var(--st-watch-bg); border: 1px solid var(--st-watch-line); }
@@ -1106,16 +1080,8 @@ html[data-theme="dark"] .badge.hold { color: #0b0f17; }
   white-space: nowrap;
   box-shadow: 0 1px 3px rgba(0,0,0,.18);
 }
-.radar.yellow {
-  color: #874d00;
-  background: color-mix(in srgb, var(--radar-y) 16%, #fff);
-  border: 1px solid var(--radar-y-line);
-}
-.radar.orange {
-  color: #873800;
-  background: color-mix(in srgb, var(--radar-o) 16%, #fff);
-  border: 1px solid var(--radar-o-line);
-}
+.radar.yellow { color: #874d00; background: color-mix(in srgb, var(--radar-y) 16%, #fff); border: 1px solid var(--radar-y-line); }
+.radar.orange { color: #873800; background: color-mix(in srgb, var(--radar-o) 16%, #fff); border: 1px solid var(--radar-o-line); }
 html[data-theme="dark"] .radar.yellow { color: #e8c05a; background: #2b2413; border-color: #5c4a12; }
 html[data-theme="dark"] .radar.orange { color: #e8a35a; background: #2b2013; border-color: #5c4412; }
 .near,
@@ -1591,15 +1557,8 @@ html[data-theme="dark"] .sd-radar.orange { color: #e8a35a; background: #2b2013; 
 
 /* ===== 数据健康细条 ===== */
 .health {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 8px 12px;
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    font-size: 12px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px;
+  background: var(--color-card); border: 1px solid var(--color-border); border-radius: 8px; font-size: 12px;
 }
 /* 窄屏收一档：四个胶囊放不下时换行显示（wrap 落点），行距 6px 防贴叠 */
 @media (max-width: 560px) {
@@ -1624,35 +1583,17 @@ html[data-theme="dark"] .sd-radar.orange { color: #e8a35a; background: #2b2013; 
 .health .pill.fail i { background: var(--status-fail); }
 .health .pill .t { color: var(--color-muted); }
 .health-banner {
-    margin-bottom: 12px;
-    padding: 7px 12px;
-    border-radius: 8px;
-    background: var(--err-bg);
-    border: 1px solid var(--err-line);
-    color: var(--err-ink);
-    font-size: 12px;
+  margin-bottom: 12px; padding: 7px 12px; border-radius: 8px;
+  background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err-ink); font-size: 12px;
   /* 红条为 flex 行：文案占满（hb-text）＋ 右侧可挂重试指数源按钮 */
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
 .health-banner .hb-text { flex: 1; min-width: 0; }
 /* 指数主源重试入口 + 结果提示 */
 .health .retry-btn, .health-banner .retry-btn {
-    margin-left: auto;
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: 1px solid var(--color-border);
-    background: var(--color-card);
-    color: var(--color-muted);
-    border-radius: 999px;
-    padding: 2px 10px;
-    font-size: 12px;
-    cursor: pointer;
-    white-space: nowrap;
+  margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--color-border); background: var(--color-card); color: var(--color-muted);
+  border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
 }
 .health .retry-btn:hover:not(:disabled) { color: var(--color-primary); border-color: var(--color-primary); }
 .health-banner .retry-btn { background: transparent; border-color: var(--err-line); color: var(--err-ink); }
@@ -1665,14 +1606,8 @@ html[data-theme="dark"] .sd-radar.orange { color: #e8a35a; background: #2b2013; 
 /* ===== 顶栏主题/涨跌色切换钮 ===== */
 .tab-tools { margin-left: auto; display: flex; gap: 4px; align-items: center; padding-right: 10px; }
 .theme-btn {
-    border: 1px solid var(--color-border);
-    background: var(--color-card);
-    color: var(--color-muted);
-    border-radius: 4px;
-    padding: 4px 10px;
-    font-size: 12px;
-    cursor: pointer;
-    white-space: nowrap;
+  border: 1px solid var(--color-border); background: var(--color-card); color: var(--color-muted);
+  border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
 }
 .theme-btn:hover { color: var(--color-primary); border-color: var(--color-primary); }
 
@@ -1918,15 +1853,9 @@ html[data-theme="dark"] .m-cell.selected { background: #2b2013; }
 
 /* 首页收益条（占据原资产总览位置；顶部固定非排序区块） */
 .profit-strip {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin: 10px 0 0;
-    padding: 10px 14px;
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 10px 0 0; padding: 10px 14px;
+  background: var(--color-card); border: 1px solid var(--color-border); border-radius: 8px;
   user-select: none;
 }
 .profit-strip .ps-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -2059,21 +1988,17 @@ html[data-theme="dark"] .m-cell.selected { background: #2b2013; }
 .m5-scroll { overflow-x: auto; }
 /* 日历格子质感（轻量：圆角/边框/悬停浮起，色阶独立） */
 .returns-page .m-cell, .returns-page .week-col, .returns-page .ym-cell {
-    border-radius: 8px;
-    border: 1px solid var(--color-border);
-    transition: transform .15s ease, box-shadow .15s ease;
+  border-radius: 8px; border: 1px solid var(--color-border); transition: transform .15s ease, box-shadow .15s ease;
 }
 .returns-page .m-cell:hover, .returns-page .week-col:hover, .returns-page .ym-cell:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px -2px rgba(15, 23, 42, .10);
+  transform: translateY(-2px); box-shadow: 0 4px 12px -2px rgba(15, 23, 42, .10);
 }
 /* 胶囊轨道（高度 8px，轨道底色统一） */
 .returns-page .attr-track { background: var(--color-bg-soft); }
 /* 金色微光横幅 */
 .returns-page .m-placeholder {
   background: linear-gradient(90deg, #fffbf0 0%, #fff 100%);
-    border: 1px dashed #e4c688;
-    border-radius: 14px;
+  border: 1px dashed #e4c688; border-radius: 14px;
   color: #8c6b2d;
 }
 .returns-page .m-placeholder .hint { color: #8c6b2d; opacity: .8; }
