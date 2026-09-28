@@ -18,6 +18,7 @@
   --fs-sm: 12px;
   --fs-xl: 22px;
   --fs-2xl: 28px;
+  --gap-blk: 16px; /* 区块纵向间距（方案 C：10px 收敛为令牌并放宽） */
   --shadow-card: 0 1px 3px rgba(0,0,0,0.06);
   /* 图表令牌 */
   --chart-line: #d4380d;
@@ -121,8 +122,8 @@ body {
 .blocks-wrap .sys-tip { order: 9; }
 /* 三卡（数据源/核心指数/当日收益）统一只保留下边距：与导航条/主表全宽对齐，
    间距全部由"上一卡的下边距"提供——排序无论如何移动都不会出现间距叠加或缺失 */
-.blocks-wrap .blk { margin: 0 0 10px; }
-.blocks-wrap .profit-strip { margin: 0 0 10px; }
+.blocks-wrap .blk { margin: 0 0 var(--gap-blk); }
+.blocks-wrap .profit-strip { margin: 0 0 var(--gap-blk); }
 .sp3 { margin-bottom: 16px; }
 
 /* ===== 资产总览容器：同底色容器 + 四卡原样；外观与全站卡片统一（外白底边框，内四卡浅灰区分；折叠交互参考核心指数监控）===== */
@@ -278,6 +279,7 @@ body {
 /* 当日/持有列金额主行：大数字层级（方案 C）；副行涨幅/年化维持小字 */
 .fund-table .d-main { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .fund-table .ant-table-thead > tr > th { background: var(--color-thead); color: var(--color-muted); font-weight: 500; }
+.fund-table .ant-table-tbody > tr > td { padding-top: 12px; padding-bottom: 12px; } /* 方案 C：行高放宽（antd middle 默认 8px） */
 .fund-table .ant-table-tbody > tr { cursor: pointer; }
 /* 基金名称列窄列宽单行省略（代码在下方第二行；固定内容宽防止自动布局按长名撑宽） */
 .fund-name { width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -496,7 +498,7 @@ body {
   box-shadow: var(--shadow-card);
 }
 .analysis-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-.analysis-head b { font-size: 15px; }
+.analysis-head b { font-size: 13px; font-weight: 600; }
 .analysis-head .date { font-size: var(--fs-sm); color: var(--color-muted); }
 .report-text { font-size: 14px; line-height: 1.9; }
 /* 规则报告逐条无序列表：保持与原段落一致的字号/行距，条目间距略收紧 */
@@ -522,7 +524,7 @@ body {
   box-shadow: var(--shadow-card);
 }
 .chart-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-.chart-head b { font-size: 15px; }
+.chart-head b { font-size: 13px; font-weight: 600; }
 .chart-legend { display: flex; gap: 16px; font-size: 12px; color: var(--color-muted); }
 .chart-legend i {
   display: inline-block;
@@ -541,7 +543,7 @@ body {
   box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
 }
 .idxm-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-width: 0; }
-.idxm-title { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.idxm-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
 .idxm-status { display: flex; gap: 10px; font-size: 12px; color: var(--color-muted); white-space: nowrap; }
 .idxm-dot {
   display: inline-block;
