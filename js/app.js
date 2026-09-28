@@ -3763,7 +3763,7 @@ ${STRATEGY_CFG_MODAL}
           <div class="sp3-head" role="button" tabindex="0" :aria-expanded="String(!summaryCollapsed)" aria-label="收益总览，点击折叠或展开" @click="onSummaryHeadClick" @keydown.enter="onSummaryHeadKey" @keydown.space="onSummaryHeadKey">
             <span class="sp3-title">收益总览</span>
             <span class="sp-sum">总资产 <b>{{ portfolio.total.value != null ? maskText(formatMoney(portfolio.total.value), summaryHidden) : '待更新' }}</b> · 累计 <b>{{ portfolio.total.cumulativeProfit != null ? maskText(formatMoney(portfolio.total.cumulativeProfit), summaryHidden) : '—' }}</b></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="summaryHidden = !summaryHidden">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask">{{ summaryHidden ? '🙈' : '👁' }}</button>
             <button type="button" class="sp-fold-btn" :title="summaryCollapsed ? '展开' : '收起'" @click.stop="summaryCollapsed = !summaryCollapsed"><span class="t-open">收起</span><span class="t-closed">展开</span><span class="chev">▲</span></button>
           </div>
           <div v-show="!summaryCollapsed" class="sp3-body"><div class="sp3-in hero">
