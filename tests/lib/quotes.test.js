@@ -18,6 +18,7 @@ import {
   parseTencentMinutes,
   thinBySegment,
   sparkCoversSession,
+  clampIndexTimes,
 } from '../../lib/quotes.js';
 
 test('parseFundgz：解析 JSONP 文本为对象', () => {
@@ -718,4 +719,31 @@ test('sparkCoversSession：出时段「终局」判据——每条有效分时�
   assert.equal(sparkCoversSession([{ spark: [['09:31', 0]] }, { spark: null }], 'us'), false);
   assert.equal(sparkCoversSession(null, 'us'), false);
   assert.equal(sparkCoversSession(one('15:00'), 'xx'), true);
+});
+
+test('clampIndexTimes：沪市盘后滚动时间戳钳回收盘时刻（深市/容忍区不动，美股不处理）', () => {
+  const bj = (h, m, sec) =>
+    Math.floor(
+      Date.parse(
+        `2026-09-28T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec ?? 0).padStart(2, '0')}+08:00`,
+      ) / 1000,
+    );
+  const mk = (code, t) => ({ code, name: 'x', price: 1, change_pct: 0, time: t });
+  const out = clampIndexTimes([
+    mk('000001', bj(16, 19, 58)), // 沪市盘后滚动（实测 16:19）
+    mk('000688', bj(16, 11, 42)),
+    mk('399006', bj(15, 0, 3)), // 深市正常收盘时刻（容忍区内）
+    mk('000300', bj(14, 59, 30)), // 盘中
+    mk('HSI', bj(16, 8, 50)), // 港股盘后
+    mk('NDX', bj(4, 0, 0)), // 美股跨午夜会话不处理
+    mk('000905', null), // 无时间
+  ]);
+  assert.equal(out[0].time, bj(15, 0, 0));
+  assert.equal(out[1].time, bj(15, 0, 0));
+  assert.equal(out[2].time, bj(15, 0, 3), '容忍区内不钳');
+  assert.equal(out[3].time, bj(14, 59, 30), '盘中不动');
+  assert.equal(out[4].time, bj(16, 0, 0));
+  assert.equal(out[5].time, bj(4, 0, 0), '美股不钳');
+  assert.equal(out[6].time, null);
+  assert.deepEqual(clampIndexTimes(null), []);
 });
