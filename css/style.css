@@ -1,15 +1,15 @@
 :root {
   /* 基础令牌 */
-  --color-up: #f5222d;
-  --color-down: #389e0d;
+  --color-up: #cf1322;
+  --color-down: #2b7a0b;
   --color-primary: #d4380d;
   --color-primary-hover: #b32d0a; /* hover 深一档 */
   --color-bg: #f5f6f8;
   --color-bg-soft: #f8fafc;
   --color-card: #ffffff;
   --color-text: #333333;
-  --color-muted: #888888;
-  --color-faint: #bbbbbb;
+  --color-muted: #707070;
+  --color-faint: #767676;
   --color-border: #e0e0e0;
   --color-thead: #fafafa;
   --color-badge-bg: #eeeeee;
@@ -17,8 +17,8 @@
   /* 图表令牌 */
   --chart-line: #d4380d;
   --chart-grid: #f0f0f0;
-  --chart-tick: #999999;
-  --chart-invest: #8a919c;
+  --chart-tick: #6e7681;
+  --chart-invest: #6e7681;
   /* 语义色块（信息/警示/错误/成功，可读性基线） */
   --ok-bg: #f6ffed; --ok-ink: #135200; --ok-line: #b7eb8f;
   --warn-bg: #fffbe6; --warn-ink: #874d00; --warn-line: #ffe58f;
@@ -41,7 +41,7 @@ html[data-theme="dark"] {
   --color-card: #1d2026;
   --color-text: #e6e8eb;
   --color-muted: #8a919c;
-  --color-faint: #565d66;
+  --color-faint: #828a94; /* 暗色 faint 对卡底 4.67:1 */
   --color-border: #2e333b;
   --color-thead: #232830;
   --color-badge-bg: #2a2f37;
@@ -49,7 +49,7 @@ html[data-theme="dark"] {
   --chart-line: #ff7a45;
   --chart-grid: #2e333b;
   --chart-tick: #8a919c;
-  --chart-invest: #7d8590;
+  --chart-invest: #828a94;
   --ok-bg: #16241a; --ok-ink: #95de64; --ok-line: #3d5c2f;
   --warn-bg: #2b2413; --warn-ink: #e8c05a; --warn-line: #5c4a12;
   --warn2-bg: #2b2013; --warn2-ink: #e8a35a; --warn2-line: #5c4412;
@@ -619,6 +619,8 @@ body {
   line-height: 1;
   cursor: pointer;
 }
+/* 可见钮 18px 低于 24px 触达线：伪元素扩热区至 26×26（inset:-4px 恰好不与相邻预览的热区重叠） */
+.ocr-remove::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
 .ocr-remove:hover { color: var(--color-danger); border-color: var(--color-danger); }
 .ocr-msg { font-size: 12px; color: var(--color-muted); margin-top: 6px; }
 .ocr-msg.err { color: var(--color-danger); }
@@ -1025,8 +1027,14 @@ canvas { max-width: 100%; }
 .badge.sl    { color: #fff; background: var(--st-sl); }
 .badge.add   { color: #fff; background: var(--st-add); }
 .badge.exit  { color: #fff; background: var(--st-exit); }
-html[data-theme="dark"] .badge.exit { color: #0b0f17; } /* 暗色清空底 #cbd5e1 过浅，换深字 */
-.badge.dim   { opacity: .55; }
+html[data-theme="dark"] .badge.exit { color: #0b0f17; } 
+html[data-theme="dark"] .badge.hold { color: #0b0f17; } 
+.badge.dim {
+  color: var(--color-muted);
+  background: var(--color-card);
+  border: 1px dashed var(--color-border);
+  box-shadow: none;
+}
 .badge .ratio { font-weight: 800; }
 .al-sub { font-size: 11px; color: var(--color-muted); white-space: nowrap; }
 .al-bar { width: 100%; height: 4px; border-radius: 2px; background: var(--color-border); overflow: hidden; }
@@ -1046,9 +1054,12 @@ html[data-theme="dark"] .badge.exit { color: #0b0f17; } /* 暗色清空底 #cbd5
   white-space: nowrap;
   box-shadow: 0 1px 3px rgba(0,0,0,.18);
 }
-.radar.yellow { color: #fff; background: var(--radar-y); border: 1px solid var(--radar-y-line); }
-.radar.orange { color: #fff; background: var(--radar-o); border: 1px solid var(--radar-o-line); }
-.near {
+.radar.yellow { color: #874d00; background: color-mix(in srgb, var(--radar-y) 16%, #fff); border: 1px solid var(--radar-y-line); }
+.radar.orange { color: #873800; background: color-mix(in srgb, var(--radar-o) 16%, #fff); border: 1px solid var(--radar-o-line); }
+html[data-theme="dark"] .radar.yellow { color: #e8c05a; background: #2b2413; border-color: #5c4a12; }
+html[data-theme="dark"] .radar.orange { color: #e8a35a; background: #2b2013; border-color: #5c4412; }
+.near,
+.sd-tagx {
   font-size: 10.5px;
   color: var(--warn2-ink);
   border: 1px dashed var(--warn2-line);
@@ -1388,7 +1399,6 @@ html[data-theme="dark"] .sd-radar.orange { color: #e8a35a; background: #2b2013; 
   align-items: center;
   color: var(--gold);
   cursor: help;
-  outline: none;
 }
 .sd-tip::after {
   content: attr(data-tip);
@@ -1570,7 +1580,7 @@ html[data-theme="dark"] .sd-radar.orange { color: #e8a35a; background: #2b2013; 
 .tab-tools { margin-left: auto; display: flex; gap: 4px; align-items: center; padding-right: 10px; }
 .theme-btn {
   border: 1px solid var(--color-border); background: var(--color-card); color: var(--color-muted);
-  border-radius: 4px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
 }
 .theme-btn:hover { color: var(--color-primary); border-color: var(--color-primary); }
 

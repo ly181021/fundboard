@@ -2403,7 +2403,9 @@ const app = createApp({
           data.assets.splice(0, data.assets.length, ...imported.assets);
           persist();
         } catch (err) {
-          alert('导入失败：JSON 格式错误');
+          alert(
+            '导入失败：无法识别为有效的 JSON 备份（需含 assets 字段）。请用工具栏「导出」生成的文件再试。',
+          );
         }
       };
       reader.readAsText(file);
