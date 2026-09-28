@@ -6,7 +6,7 @@
  * 输出 HTML 不随展开状态变化：收起/展开双文案 span + 外层 .is-collapsed 由 CSS 切换；
  * 保证切换时 v-html 字符串不变，高度过渡动画不受 DOM 重建影响。
  *
- * items: [{ code, name, priceText, chgText, chgColor, timeText, open, phase }]
+ * items: [{ code, name, priceText, chgText, chgColor, amtText, timeText, open, phase }]
  *        文字、颜色已预格式化；phase='lunch' 状态点显示「午间休市」。
  * status: [{ label, open, phase }]，取自 marketClock.marketStatusOf().items
  * sparkByCode: { [code]: { market, last_pct, spark: [[t,pct], …] | null } }
@@ -31,6 +31,20 @@ export function displayChangePct(
 const arrowOf = (chgText) => {
   const t = String(chgText).trim();
   return t.startsWith('+') ? '↑' : t.startsWith('-') ? '↓' : '—';
+};
+
+/** 涨跌胶囊方向类：符号判定与 arrowOf 同源（涨 up / 跌 dn / 平 none） */
+const pillClsOf = (chgText) => {
+  const t = String(chgText).trim();
+  return t.startsWith('+') ? 'up' : t.startsWith('-') ? 'dn' : 'none';
+};
+
+/** 涨跌胶囊文案：有涨跌额显示「▲ 涨跌额 · 涨跌幅」，额缺失（美股新浪备源）只显示「▲ 涨跌幅」 */
+const pillTextOf = (it) => {
+  const arrow = it.chgText.startsWith('+') ? '▲' : it.chgText.startsWith('-') ? '▼' : '—';
+  const pct = String(it.chgText).trim();
+  const amt = it.amtText != null ? `${String(it.amtText).trim()} · ` : '';
+  return `${arrow} ${amt}${pct}`;
 };
 
 /** 市场阶段 → 状态文案：午间休市不是收盘，不能写成"已收盘"（缺 phase 时按 open 兜底） */
@@ -58,7 +72,7 @@ export function indexMonitorCardHtml(items, { status = [], orderCtx = {}, sparkB
       return `
       <div class="idxm-card">
         <div class="idxm-card-top"><span class="idxm-name">${it.name}<i class="idxm-dot ${it.open ? 'open' : ''}" title="${phaseText(it.open, it.phase)}"></i></span><span class="idxm-time">${it.timeText}</span></div>
-        <div class="idxm-main"><span class="idxm-price">${it.priceText}</span><span class="idxm-chg" style="color:${it.chgColor}">${it.chgText}</span></div>
+        <div class="idxm-main"><span class="idxm-price">${it.priceText}</span><span class="idxm-pill ${pillClsOf(it.chgText)}">${pillTextOf(it)}</span></div>
         <div class="idxm-spark">${inner}</div>
       </div>`;
     })

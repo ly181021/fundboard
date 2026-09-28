@@ -2535,6 +2535,10 @@ const app = createApp({
               name: idx.name,
               priceText: idx.price?.toFixed(2) ?? '—',
               chgText: pctVal == null ? '—' : `${pctVal > 0 ? '+' : ''}${pctVal.toFixed(2)}%`,
+              amtText:
+                idx.change_amt == null || pctVal == null
+                  ? null
+                  : `${idx.change_amt > 0 ? '+' : ''}${idx.change_amt.toFixed(2)}`,
               chgColor: profitColor(pctVal),
               timeText: formatIndexTime(idx.time),
               open: indexStatus.value[marketOfIndex(idx.code)], // 海外指数白名单映射（marketClock）——老的 A 股/港股两分支不覆盖美股，会错拿 A 股窗口

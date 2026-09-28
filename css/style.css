@@ -596,9 +596,20 @@ body {
 .idxm-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
 .idxm-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .idxm-time { font-size: var(--fs-xs); color: var(--color-muted); white-space: nowrap; }
-.idxm-main { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-top: 3px; }
+.idxm-main { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 3px; }
 .idxm-price { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
-.idxm-chg { font-size: 14px; font-weight: 600; white-space: nowrap; }
+/* 涨跌胶囊（方案 C）：浅底深字挂 --color-up/down 令牌——涨跌色预设与明暗主题自动跟随 */
+.idxm-pill {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.idxm-pill.up { color: var(--color-up); background: color-mix(in srgb, var(--color-up) 8%, var(--card)); }
+.idxm-pill.dn { color: var(--color-down); background: color-mix(in srgb, var(--color-down) 8%, var(--card)); }
+.idxm-pill.none { color: var(--color-muted); background: var(--color-badge-bg); }
 /* 当天迷你分时：槽位恒定 34px 高——未接线空槽、无曲线写"暂无分时"，都不改变卡片高度。
    底色刻意用 transparent 而非任何令牌：曲线区与 .idxm-card 同底（浅色下不再是白块），
    且日后卡片底色若调整会自动跟随、不会再出现两处色差（`overflow:hidden` 仍保留——它裁的是描边，
