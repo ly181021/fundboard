@@ -123,7 +123,7 @@ test('详情卡：三大板块结构 + 到手预估 + 合规标注 + ack 数据'
     html.includes('sd-decision') && html.includes('sd-evidence') && html.includes('sd-action'),
   );
   // 头部：横向头（状态色带+身份+数据时点）+ 状态药丸（.sd-head）
-  assert.ok(html.includes('sd-head') && html.includes('演示基金') && html.includes('数据时点'));
+  assert.ok(html.includes('sd-head') && html.includes('演示基金') && html.includes('净值日'));
   assert.ok(html.includes('>止盈 · 1/2<')); // 药丸比例用 · 分隔（对稿）
   // 证据层主干：现状触发 / 规则动作；单容器表格化.sd-stream（三段+雷达行同容器）；风控初衷折叠在容器内
   assert.ok(
