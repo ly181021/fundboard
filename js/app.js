@@ -3277,22 +3277,22 @@ const app = createApp({
               <div class="fund-code">{{ record.code }}</div>
             </template>
             <template v-else-if="column.key === 'principal'">
-              {{ formatMoney(record.state.totalInvested) }}
+              {{ maskText(formatMoney(record.state.totalInvested), summaryHidden) }}
             </template>
             <template v-else-if="column.key === 'daily'">
               <!-- 当日列：上面收益、下面涨幅（合并展示）；净值未发布到当天时显示待更新。
                    整列可点 → 实时估值盘（估值中/已更新/净值滞后/待更新 四种状态面板按状态分支） -->
               <div class="cell-est" title="查看实时估值盘（估值净值与确认净值明细）" @click.stop="openEstimateBoard(record)">
                 <div>
-                  <span v-if="record.state.dayProfit != null" :style="{ color: profitColor(record.state.dayProfit) }">
-                    {{ formatMoney(record.state.dayProfit) }}
+                  <span v-if="record.state.dayProfit != null" :style="summaryHidden ? {} : { color: profitColor(record.state.dayProfit) }">
+                    {{ maskText(formatMoney(record.state.dayProfit), summaryHidden) }}
                   </span>
                   <span v-else class="muted">待更新</span>
                 </div>
                 <div class="nav-date">
                   <template v-if="record.state.dayChangePct != null">
-                    <span :style="{ color: profitColor(record.state.dayChangePct) }">
-                      {{ record.state.dayChangePct > 0 ? '+' : '' }}{{ record.state.dayChangePct.toFixed(2) }}%
+                    <span :style="summaryHidden ? {} : { color: profitColor(record.state.dayChangePct) }">
+                      {{ maskText((record.state.dayChangePct > 0 ? '+' : '') + record.state.dayChangePct.toFixed(2) + '%', summaryHidden) }}
                     </span>
                     <span v-if="record.state.mode === 'estimate'" class="tag-est">估</span>
                     <span v-else-if="record.state.dataDate === todayStr()" class="tag-confirmed">已更新</span>
@@ -3305,18 +3305,18 @@ const app = createApp({
             <template v-else-if="column.key === 'yesterday'">
               <!-- 取值与汇总层同口径回退（prevDayProfit ?? dailyProfit）：周末/长假/周一盘前
                    prevDayProfit 为 null，显示的是「最近净值日」单日变动——列标题此时显示为「上一净值日」 -->
-              <span v-if="prevDayProfitOf(record.state) != null" :style="{ color: profitColor(prevDayProfitOf(record.state)) }">
-                {{ formatMoney(prevDayProfitOf(record.state)) }}
+              <span v-if="prevDayProfitOf(record.state) != null" :style="summaryHidden ? {} : { color: profitColor(prevDayProfitOf(record.state)) }">
+                {{ maskText(formatMoney(prevDayProfitOf(record.state)), summaryHidden) }}
               </span>
               <span v-else class="muted">待更新</span>
               <span v-if="navIsLagged(record.state)" class="tag-lag" :title="'净值更新滞后：当日/昨日按 ' + record.state.navDate + ' 口径'">净值 {{ record.state.navDate.slice(5) }}</span>
             </template>
             <template v-else-if="column.key === 'hold'">
-              <span :style="{ color: profitColor(record.state.holdProfit) }">
-                {{ formatMoney(record.state.holdProfit) }}
+              <span :style="summaryHidden ? {} : { color: profitColor(record.state.holdProfit) }">
+                {{ maskText(formatMoney(record.state.holdProfit), summaryHidden) }}
               </span>
               <div v-if="record.state.returnRate != null" class="nav-date">
-                {{ pctText(record.state.returnRate) }}<template v-if="record.state.xirr != null"> · 年化 {{ pctText(record.state.xirr) }}</template>
+                {{ maskText(pctText(record.state.returnRate), summaryHidden) }}<template v-if="record.state.xirr != null"> · 年化 {{ maskText(pctText(record.state.xirr), summaryHidden) }}</template>
               </div>
             </template>
             <template v-else-if="column.key === 'alert'">
@@ -3414,7 +3414,7 @@ const app = createApp({
                 <span class="metric-tag info">最新净值 {{ navModal.fund.state.latestNav ?? '—' }}（{{ navModal.fund.state.navDate ?? '—' }}）</span>
                 <span v-if="navRangeChange" class="metric-tag info">区间涨幅 {{ navRangeChange }}</span>
                 <span v-if="navDrawdown" class="metric-tag info">近90日最大回撤 {{ navDrawdown }}</span>
-                <span v-if="navModal.fund.state.xirr != null" class="metric-tag info">年化(XIRR) {{ pctText(navModal.fund.state.xirr) }}</span>
+                <span v-if="navModal.fund.state.xirr != null" class="metric-tag info">年化(XIRR) {{ maskText(pctText(navModal.fund.state.xirr), summaryHidden) }}</span>
               </div>
             </template>
           </template>
@@ -3424,7 +3424,7 @@ const app = createApp({
             <template v-else>
               <div class="chart-box"><canvas ref="navCanvas"></canvas></div>
               <div class="chart-foot">
-                <span class="metric-tag info">最新持有收益 {{ navHoldingLatest != null ? formatMoney(navHoldingLatest) : '—' }}</span>
+                <span class="metric-tag info">最新持有收益 {{ navHoldingLatest != null ? maskText(formatMoney(navHoldingLatest), summaryHidden) : '—' }}</span>
               </div>
             </template>
           </template>
@@ -3456,15 +3456,15 @@ const app = createApp({
               </div>
               <div class="est-box">
                 <div class="l">{{ estimateBoardView.mainIsEstimate ? '估算当日盈亏' : '当日盈亏' }}</div>
-                <div class="v" :style="{ color: profitColor(estimateBoardView.dayProfit) }">{{ estimateBoardView.dayProfit != null ? formatMoney(estimateBoardView.dayProfit) : '—' }}</div>
+                <div class="v" :style="summaryHidden ? {} : { color: profitColor(estimateBoardView.dayProfit) }">{{ estimateBoardView.dayProfit != null ? maskText(formatMoney(estimateBoardView.dayProfit), summaryHidden) : '—' }}</div>
                 <div class="s">持有份额 {{ estimateBoardView.holdShares != null ? estimateBoardView.holdShares.toFixed(2) : '—' }} · 持有收益
-                  <span :style="{ color: profitColor(estimateBoardView.holdProfit) }">{{ estimateBoardView.holdProfit != null ? formatMoney(estimateBoardView.holdProfit) : '—' }}</span>
+                  <span :style="summaryHidden ? {} : { color: profitColor(estimateBoardView.holdProfit) }">{{ estimateBoardView.holdProfit != null ? maskText(formatMoney(estimateBoardView.holdProfit), summaryHidden) : '—' }}</span>
                 </div>
               </div>
               <div class="est-box">
                 <div class="l">{{ estimateBoardView.mainIsEstimate ? '估算市值' : '市值' }}</div>
-                <div class="v">{{ estimateBoardView.marketValue != null ? formatMoney(estimateBoardView.marketValue) : '—' }}</div>
-                <div class="s">累计投入 {{ estimateBoardView.totalInvested != null ? formatMoney(estimateBoardView.totalInvested) : '—' }}</div>
+                <div class="v">{{ estimateBoardView.marketValue != null ? maskText(formatMoney(estimateBoardView.marketValue), summaryHidden) : '—' }}</div>
+                <div class="s">累计投入 {{ estimateBoardView.totalInvested != null ? maskText(formatMoney(estimateBoardView.totalInvested), summaryHidden) : '—' }}</div>
               </div>
               <div class="est-box">
                 <div class="l">最近确认净值</div>
@@ -3544,7 +3544,7 @@ const app = createApp({
                   <span :class="record.tx.type === 'buy' ? 'up' : record.tx.type === 'sell' ? 'down' : 'muted'">{{ txLabel(record.tx) }}</span>
                 </template>
                 <template v-else-if="column.key === 'amount'">
-                  {{ record.tx.amount != null ? formatMoney(record.tx.amount) : '—' }}
+                  {{ record.tx.amount != null ? maskText(formatMoney(record.tx.amount), summaryHidden) : '—' }}
                 </template>
                 <template v-else-if="column.key === 'shares'">
                   {{ record.tx.shares != null ? record.tx.shares : '—' }}
