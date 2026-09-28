@@ -3308,7 +3308,7 @@ const app = createApp({
                    整列可点 → 实时估值盘（估值中/已更新/净值滞后/待更新 四种状态面板按状态分支） -->
               <div class="cell-est" title="查看实时估值盘（估值净值与确认净值明细）" @click.stop="openEstimateBoard(record)">
                 <div>
-                  <span v-if="record.state.dayProfit != null" :style="summaryHidden ? {} : { color: profitColor(record.state.dayProfit) }">
+                  <span v-if="record.state.dayProfit != null" class="d-main" :style="summaryHidden ? {} : { color: profitColor(record.state.dayProfit) }">
                     {{ maskText(formatMoney(record.state.dayProfit), summaryHidden) }}
                   </span>
                   <span v-else class="muted">待更新</span>
@@ -3336,7 +3336,7 @@ const app = createApp({
               <span v-if="navIsLagged(record.state)" class="tag-lag" :title="'净值更新滞后：当日/昨日按 ' + record.state.navDate + ' 口径'">净值 {{ record.state.navDate.slice(5) }}</span>
             </template>
             <template v-else-if="column.key === 'hold'">
-              <span :style="summaryHidden ? {} : { color: profitColor(record.state.holdProfit) }">
+              <span class="d-main" :style="summaryHidden ? {} : { color: profitColor(record.state.holdProfit) }">
                 {{ maskText(formatMoney(record.state.holdProfit), summaryHidden) }}
               </span>
               <div v-if="record.state.returnRate != null" class="nav-date">

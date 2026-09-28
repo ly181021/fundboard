@@ -16,6 +16,8 @@
   /* 字号令牌 */
   --fs-xs: 11px;
   --fs-sm: 12px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
   --shadow-card: 0 1px 3px rgba(0,0,0,0.06);
   /* 图表令牌 */
   --chart-line: #d4380d;
@@ -273,6 +275,8 @@ body {
   font-size: 13px;
 }
 .fund-table .ant-table { background: transparent; }
+/* 当日/持有列金额主行：大数字层级（方案 C）；副行涨幅/年化维持小字 */
+.fund-table .d-main { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .fund-table .ant-table-thead > tr > th { background: var(--color-thead); color: var(--color-muted); font-weight: 500; }
 .fund-table .ant-table-tbody > tr { cursor: pointer; }
 /* 基金名称列窄列宽单行省略（代码在下方第二行；固定内容宽防止自动布局按长名撑宽） */
@@ -593,7 +597,7 @@ body {
 .idxm-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .idxm-time { font-size: var(--fs-xs); color: var(--color-muted); white-space: nowrap; }
 .idxm-main { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-top: 3px; }
-.idxm-price { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.idxm-price { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
 .idxm-chg { font-size: 14px; font-weight: 600; white-space: nowrap; }
 /* 当天迷你分时：槽位恒定 34px 高——未接线空槽、无曲线写"暂无分时"，都不改变卡片高度。
    底色刻意用 transparent 而非任何令牌：曲线区与 .idxm-card 同底（浅色下不再是白块），
@@ -1931,7 +1935,7 @@ html[data-theme="dark"] .m-cell.selected { background: #2b2013; }
 }
 .profit-strip .ps-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .profit-strip .ps-label { font-weight: 700; white-space: nowrap; }
-.profit-strip .ps-num { font-size: 20px; font-variant-numeric: tabular-nums; }
+.profit-strip .ps-num { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
 .profit-strip .ps-sub { display: flex; align-items: center; gap: 12px; color: var(--color-muted); font-size: 12.5px; }
 .profit-strip .ps-flex { flex: 1; }
 .profit-strip .ps-date { color: var(--color-faint); }
