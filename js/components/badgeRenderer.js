@@ -171,7 +171,7 @@ export function strategyTimelineHtml(alerts) {
       </div>`;
     })
     .join('');
-  return `<div class="tl">${items || '<div class="tl-empty">还没有触发记录——策略触发时会在这里留痕，可回看"当时为什么喊你操作"。</div>'}</div>`;
+  return `<div class="tl">${items || '<div class="tl-empty">还没有触发记录——策略触发时会在这里留痕，可回看「当时为什么喊你操作」。</div>'}</div>`;
 }
 
 /**

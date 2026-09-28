@@ -42,7 +42,7 @@ export function buildEstimateBoard(state, quote, { today, name } = {}) {
     statusNote = `净值滞后品种：数据属其净值日 ${state.dataDate ?? '—'}（按到账口径）`;
   else if (isQdii)
     statusNote = 'QDII 基金不使用盘中估值（第三方自算滞后失真），按确认净值与到账口径展示';
-  else if (!hasQuote) statusNote = '尚未拉到行情——可点「刷新行情」或等下一轮轮询（60 秒）';
+  else if (!hasQuote) statusNote = '尚未拉到行情——可点「刷新」或等下一轮轮询（60 秒）';
   else statusNote = '该基金暂无盘中估值数据，且今日确认净值尚未发布';
 
   return {

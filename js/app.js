@@ -330,7 +330,7 @@ const app = createApp({
         })
         .catch((e) => {
           if (e.conflict) {
-            alert('服务端数据已被其他窗口修改，请刷新页面后再操作（本机改动可先"导出"备份）');
+            alert('服务端数据已被其他窗口修改，请刷新页面后再操作（本机改动可先「导出」备份）');
           } else {
             pendingSync.value = true;
           }
@@ -3219,7 +3219,7 @@ const app = createApp({
             <span>昨日 <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
             <span v-if="stripDateLabel" class="ps-date">{{ stripDateLabel }}</span>
             <span class="ps-flex"></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示资产数字' : '隐藏资产数字（防窥）'" @click.stop="toggleMask">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask">{{ summaryHidden ? '🙈' : '👁' }}</button>
           </div>
         </div>
         <div v-if="quoteStatus === 'failed'" class="offline-tip sys-tip">
@@ -3380,7 +3380,7 @@ const app = createApp({
         <div class="analysis-head">
           <b>策略触发记录</b>
           <span class="analysis-head-right">
-            <span class="date">触发即留痕 · 可回看"当时为什么喊你操作"</span>
+            <span class="date">触发即留痕 · 可回看「当时为什么喊你操作」</span>
             <button class="btn-mini" :disabled="strategyStatus.loading" @click="runStrategyNow">{{ strategyStatus.loading ? '巡检中…' : '立即巡检' }}</button>
           </span>
         </div>
@@ -3504,7 +3504,7 @@ const app = createApp({
               </div>
               <div v-if="curveNote" class="curve-note">{{ curveNote }}</div>
               <div class="curve-note">
-                ⚠ 曲线为<b>新浪估算</b>（口径2），与上方大数字（主源天天基金）是两套算法，末尾可能差零点几个百分点；两者都属“盘中参考”，官方净值以基金公司晚间公布为准。
+                ⚠ 曲线为<b>新浪估算</b>（口径2），与上方大数字（主源天天基金）是两套算法，末尾可能差零点几个百分点；两者都属「盘中参考」，官方净值以基金公司晚间公布为准。
               </div>
             </div>
             <div class="est-meta">
@@ -3737,7 +3737,7 @@ ${STRATEGY_CFG_MODAL}
           <div class="sp3-head" role="button" tabindex="0" :aria-expanded="String(!summaryCollapsed)" aria-label="收益总览，点击折叠或展开" @click="onSummaryHeadClick" @keydown.enter="onSummaryHeadKey" @keydown.space="onSummaryHeadKey">
             <span class="sp3-title">收益总览</span>
             <span class="sp-sum">总资产 <b>{{ portfolio.total.value != null ? maskText(formatMoney(portfolio.total.value), summaryHidden) : '待更新' }}</b> · 累计 <b>{{ portfolio.total.cumulativeProfit != null ? maskText(formatMoney(portfolio.total.cumulativeProfit), summaryHidden) : '—' }}</b></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示资产数字' : '隐藏资产数字（防窥）'" @click.stop="summaryHidden = !summaryHidden">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="summaryHidden = !summaryHidden">{{ summaryHidden ? '🙈' : '👁' }}</button>
             <button type="button" class="sp-fold-btn" :title="summaryCollapsed ? '展开' : '收起'" @click.stop="summaryCollapsed = !summaryCollapsed"><span class="t-open">收起</span><span class="t-closed">展开</span><span class="chev">▲</span></button>
           </div>
           <div v-show="!summaryCollapsed" class="sp3-body"><div class="sp3-in hero">
