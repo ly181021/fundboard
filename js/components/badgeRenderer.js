@@ -237,7 +237,7 @@ function sdHead(entry) {
   return `<div class="sd-head">
     <div class="sd-id">
       <div class="sd-name"><b>${esc(entry.name || entry.code)}</b>${radar}${lag}</div>
-      <div class="sd-meta"><span class="mono">${esc(entry.code)}</span><span class="sep">/</span><span>最新净值 <b>${esc(navTxt)}</b></span><span class="sep">/</span><span>数据时点 ${esc(entry.navDate || '—')}</span></div>
+      <div class="sd-meta"><span class="mono">${esc(entry.code)}</span><span class="sep">/</span><span>最新净值 <b>${esc(navTxt)}</b></span><span class="sep">/</span><span>净值日 ${esc(entry.navDate || '—')}</span></div>
     </div>
     <div class="sd-side"><span class="sd-pill${['WATCH', 'ALERT'].includes(entry.state) ? ' soft' : ''}">${esc(b.label + ratioPart)}</span><button type="button" class="sd-close" data-sd-close="1" aria-label="关闭">✕</button></div>
   </div>`;

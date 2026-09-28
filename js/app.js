@@ -377,6 +377,7 @@ const app = createApp({
     }
 
     function openTxModal(f) {
+      openModalFocus('.modal-overlay [data-modal="tx"]');
       txModal.value = {
         fundId: f.id,
         name: f.name,
@@ -1021,7 +1022,22 @@ const app = createApp({
     const navModal = ref(null); // { fund, loading, error, range, series, tab }
     const navCanvas = ref(null);
 
+    // 弹窗焦点管理：打开时聚焦弹窗容器（键盘流从弹窗内开始 Tab），关闭时还原触发点
+    let lastModalTrigger = null;
+    function openModalFocus(selector) {
+      lastModalTrigger = document.activeElement;
+      nextTick(() => document.querySelector(selector)?.focus());
+    }
+    function closeModalRestore() {
+      if (lastModalTrigger instanceof HTMLElement) lastModalTrigger.focus();
+      lastModalTrigger = null;
+    }
+    /** 主表行键盘入口：Enter/Space 等价行点击（净值弹窗） */
+    function fundRowKeydown(e, r) {
+      if (e.key === 'Enter' || e.key === ' ') openNavModal(r);
+    }
     async function openNavModal(f) {
+      openModalFocus('.modal-overlay [data-modal="nav"]');
       navModal.value = { fund: f, loading: true, error: null, range: 30, series: [], tab: 'nav' };
       const r = await quoteService.fetchHistory(f.code, 90);
       if (!navModal.value || navModal.value.fund.code !== f.code) return; // 已关闭/切换
@@ -1520,6 +1536,7 @@ const app = createApp({
       return `${pad(t.getHours())}:${pad(t.getMinutes())}`;
     }
     function closeEstimateBoard() {
+      closeModalRestore();
       estimateBoardCode.value = null;
       estRefreshErr.value = '';
       // 曲线状态与 30 秒心跳一并收掉（否则关闭后 setInterval 永久空转）
@@ -1537,6 +1554,7 @@ const app = createApp({
       curveErr.value = null;
       curveTip.value = null;
       curveMetric.value = 'pct';
+      openModalFocus('.modal-overlay [data-modal="estimate"]');
       startCurveClock();
       measureCurveWidth(); // 先给保底宽度
       nextTick(measureCurveWidth); // 弹窗挂载后再实测
@@ -1558,6 +1576,9 @@ const app = createApp({
     // 基金被删/不在持仓 → 自动收起（不留下指向不存在基金的面板）
     watch(fundStates, () => {
       if (estimateBoardCode.value && !estimateBoardFund.value) closeEstimateBoard();
+    });
+    watch([navModal, txModal], ([nav, tx], [prevNav, prevTx]) => {
+      if ((prevNav && !nav) || (prevTx && !tx)) closeModalRestore();
     });
 
     // ---- 实时估值盘 · 当天估值走势 ----
@@ -3004,6 +3025,7 @@ const app = createApp({
       navModal,
       navCanvas,
       openNavModal,
+      fundRowKeydown,
       navSeries,
       navRangeChange,
       setRange,
@@ -3249,7 +3271,7 @@ const app = createApp({
         <div class="action-group">
           <span class="quote-status">
             <span :class="['dot', quoteStatus === 'ok' ? 'ok' : quoteStatus === 'loading' ? 'busy' : 'fail']"></span>
-            {{ quoteStatus === 'ok' ? '已更新 ' + quoteFetchedAt : quoteStatus === 'loading' ? '更新中…' : '行情失败' }}
+            {{ quoteStatus === 'ok' ? '行情 ' + quoteFetchedAt : quoteStatus === 'loading' ? '更新中…' : '行情失败' }}
           </span>
           <button class="btn-secondary" @click="refreshQuotes" :disabled="quoteStatus === 'loading'">刷新行情</button>
           <button class="btn-secondary" @click="exportData">导出</button>
@@ -3271,7 +3293,7 @@ const app = createApp({
           :scroll="{ x: 'max-content' }"
           :row-key="r => r.id"
           size="middle"
-          :custom-row="r => ({ onClick: () => openNavModal(r) })"
+          :custom-row="r => ({ onClick: () => openNavModal(r), tabindex: 0, onKeydown: (e) => fundRowKeydown(e, r) })"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'name'">
@@ -3388,7 +3410,7 @@ const app = createApp({
       </div>
 
       <div v-if="navModal" class="modal-overlay" @click.self="navModal = null">
-        <div class="modal modal-wide">
+        <div class="modal modal-wide" data-modal="nav" tabindex="-1">
           <div class="modal-header">
             <div class="m-title">
               <span class="t">{{ navModal.fund.name }}（{{ navModal.fund.code }}）</span>
@@ -3437,7 +3459,7 @@ const app = createApp({
            整列可点，面板按 state.mode/dataDate 分支（估值中 / 已更新 / 净值滞后到账 / 待更新）；
            数字随页面 60s 轮询自动更新（视图模型读 quotesMap），另有单只刷新按钮 -->
       <div v-if="estimateBoardCode" class="modal-overlay" @click.self="closeEstimateBoard()">
-        <div class="modal modal-wide" @click="onPanelClick">
+        <div class="modal modal-wide" data-modal="estimate" tabindex="-1" @click="onPanelClick">
           <div class="modal-header">
             <span>{{ estimateBoardView?.name ?? '' }}（{{ estimateBoardCode }}）· 实时估值盘</span>
             <button type="button" class="modal-close" aria-label="关闭" @click="closeEstimateBoard()">✕</button>
@@ -3523,7 +3545,7 @@ const app = createApp({
       </div>
 
       <div v-if="txModal" class="modal-overlay" @click.self="txModal = null">
-        <div class="modal modal-wide">
+        <div class="modal modal-wide" data-modal="tx" tabindex="-1">
           <div class="modal-header">
             <span>{{ txModal.name }}（{{ txModal.code }}）· 交易记录</span>
             <button type="button" class="modal-close" aria-label="关闭" @click="txModal = null">✕</button>
@@ -3799,7 +3821,7 @@ ${STRATEGY_CFG_MODAL}
              v-if="analysis" 守卫：analysis 在 quoteStatus≠ok / 无持仓时为 null，
              模板裸解引用会让根组件渲染抛错 → 整页白屏（直链 #/returns 首帧、60s 轮询在途期间必现） -->
         <div v-if="analysis" class="chart-card m-block">
-          <div class="chart-head"><b>当日盈亏归因</b><span class="hint">数据日期：{{ analysis.dataDate === analysis.today ? '当日（最近净值日）' : '最新净值日 ' + (analysis.dataDate || '').slice(5) }}</span><span class="ctl-label">金额排序：</span><button class="seg" :class="{ active: !attrSortDesc }" @click="setAttrSort(false)">升序</button><button class="seg" :class="{ active: attrSortDesc }" @click="setAttrSort(true)">降序</button></div>
+          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈亏归因' : '最新净值日盈亏归因' }}</b><span class="hint">数据日期：{{ analysis.dataDate === analysis.today ? '当日（最近净值日）' : '最新净值日 ' + (analysis.dataDate || '').slice(5) }}</span><span class="ctl-label">金额排序：</span><button class="seg" :class="{ active: !attrSortDesc }" @click="setAttrSort(false)">升序</button><button class="seg" :class="{ active: attrSortDesc }" @click="setAttrSort(true)">降序</button></div>
           <div v-if="analysis.attributionRows.length > 0" class="attr-block">
             <div v-for="row in analysis.attributionRows" :key="row.name" class="attr-row">
               <span class="attr-name">{{ row.name }}</span>
@@ -3814,7 +3836,7 @@ ${STRATEGY_CFG_MODAL}
           </div>
         </div>
         <div v-else class="chart-card m-block">
-          <div class="chart-head"><b>当日盈亏归因</b><span class="hint">数据日期：—</span></div>
+          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈亏归因' : '最新净值日盈亏归因' }}</b><span class="hint">数据日期：—</span></div>
           <div class="empty-hint">行情数据加载中或暂无持仓：数据到位后自动生成归因</div>
         </div>
 
@@ -3832,7 +3854,7 @@ ${STRATEGY_CFG_MODAL}
               <div class="cal-weekdays"><span v-for="w in ['一','二','三','四','五','六','日']" :key="w">{{ w }}</span></div>
               <div class="cal-mgrid">
                 <template v-for="(c, i) in calMonthCells.cells" :key="i">
-                  <div v-if="!c.blank" class="m-cell" :class="[{ today: c.isToday, selected: c.isSelected, tx: c.hasTx }, c.amount > 0 ? 'pos' + c.level : (c.amount < 0 ? 'neg' + c.level : '')]" :title="c.date + (c.amount != null ? ' · ' + signed(c.amount) : '') + calMarkerLabel(c)" @click="pickDay(c)">
+                  <div v-if="!c.blank" class="m-cell" :class="[{ today: c.isToday, selected: c.isSelected, tx: c.hasTx }, c.amount > 0 ? 'pos' + c.level : (c.amount < 0 ? 'neg' + c.level : '')]" :title="c.date + (c.amount != null ? ' · ' + signed(c.amount) : '') + calMarkerLabel(c)" tabindex="0" @click="pickDay(c)" @keydown.enter="pickDay(c)">
                     <div class="d"><em>{{ c.day }}</em></div>
                     <div class="amt" :class="{ none: c.amount == null }" :style="{ color: c.amount > 0 ? 'var(--color-up)' : c.amount < 0 ? 'var(--color-down)' : '' }">{{ signed(c.amount) }}</div>
                   </div>

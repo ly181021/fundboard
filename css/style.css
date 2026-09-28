@@ -13,6 +13,9 @@
   --color-border: #e0e0e0;
   --color-thead: #fafafa;
   --color-badge-bg: #eeeeee;
+  /* 字号令牌 */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
   --shadow-card: 0 1px 3px rgba(0,0,0,0.06);
   /* 图表令牌 */
   --chart-line: #d4380d;
@@ -27,6 +30,11 @@
   --err-bg: #fff1f0; --err-ink: #a8071a; --err-line: #ffa39e;
   /* 状态/错误专用色：不随涨跌色预设切换——失败/删除/错误提示必须恒为警示红 */
   --color-danger: #f5222d;
+  /* 中性信息与运行状态语义色（不挂涨跌预设）：估标签/信息标签用 info，健康点/失败点用 status-* */
+  --info: #0958d9;
+  --status-ok: #16a34a;
+  --status-busy: #d48806;
+  --status-fail: #f5222d;
   --ai-bg: #f9f0ff; --ai-line: #efdbff; --ai-badge: #722ed1;
 }
 
@@ -56,6 +64,10 @@ html[data-theme="dark"] {
   --warn3-ink: #ffd666;
   --err-bg: #2a1215; --err-ink: #ff7875; --err-line: #5c1d24;
   --color-danger: #ff7875;
+  --info: #1677ff;
+  --status-ok: #52c41a;
+  --status-busy: #e8c05a;
+  --status-fail: #ff7875;
   --ai-bg: #1f1830; --ai-line: #3a2b57; --ai-badge: #b37feb;
   /* 七态徽章暗色变体：exit 底色变浅后白字不可读，实底场景换深字（见 .badge.exit/.sd-pill 覆盖） */
   --st-hold: #94a3b8;
@@ -203,7 +215,7 @@ body {
 }
 .sp3-in .card { flex: none; background: var(--color-bg-soft); box-shadow: none; }
 .card { background: var(--color-card); border-radius: 8px; padding: 14px; box-shadow: var(--shadow-card); }
-.card-label { font-size: 12px; color: var(--color-muted); }
+.card-label { font-size: var(--fs-sm); color: var(--color-muted); }
 .card-value { font-size: 22px; font-weight: 600; margin-top: 4px; }
 .card-value.muted { color: var(--color-muted); }
 .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 0 0 8px; }
@@ -212,6 +224,8 @@ body {
   .toolbar { row-gap: 10px; }
   .sort-group { flex-wrap: wrap; gap: 4px 6px; }
   .action-group { flex-wrap: wrap; gap: 6px; }
+  /* iOS Safari 聚焦字号 <16px 的输入框会整页缩放，手机录入弹窗提到 16px */
+  .form-field input, .form-field select, .ocr-shares-input, .money-input { font-size: 16px; }
 }
 .sort-group { display: flex; align-items: center; gap: 4px; }
 .sort-label { font-size: 13px; color: var(--color-muted); }
@@ -259,11 +273,11 @@ body {
 }
 /* 交易记录弹窗表：容器内横向滚动兜底（弹窗不再被表格撑破） */
 .tx-table-wrap { margin-top: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.fund-code { font-size: 11px; color: var(--color-muted); margin-top: 2px; }
+.fund-code { font-size: var(--fs-xs); color: var(--color-muted); margin-top: 2px; }
 .muted { color: var(--color-muted); }
 .alert-badge { font-size: 11px; color: #fff; padding: 2px 6px; border-radius: 3px; }
 .alert-legend { padding: 8px 0 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.legend-label { font-size: 12px; color: var(--color-muted); }
+.legend-label { font-size: var(--fs-sm); color: var(--color-muted); }
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -298,7 +312,7 @@ body {
    select 的 min-content（最长选项文字，如长基金名）会把 1fr 轨道顶开——实测 360px 视口下
    "基金"列被撑到 357px（容器仅 242px），整块表单横向溢出弹窗。 */
 .form-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.form-field label { font-size: 12px; color: var(--color-muted); }
+.form-field label { font-size: var(--fs-sm); color: var(--color-muted); }
 .form-field input, .form-field select {
   width: 100%;
   max-width: 100%;
@@ -337,7 +351,7 @@ body {
   cursor: pointer;
 }
 .btn-cancel:hover { color: var(--color-primary); }
-.form-hint { font-size: 12px; color: var(--color-muted); margin-top: 14px; line-height: 1.6; }
+.form-hint { font-size: var(--fs-sm); color: var(--color-muted); margin-top: 14px; line-height: 1.6; }
 .action-group { display: flex; gap: 8px; align-items: center; }
 .btn-secondary {
   padding: 0 16px;
@@ -352,7 +366,7 @@ body {
 .btn-secondary:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .file-label { display: inline-flex; align-items: center; }
 /* ---- 行情看板新增组件 ---- */
-.card-sub { font-size: 12px; margin-top: 2px; color: var(--color-muted); }
+.card-sub { font-size: var(--fs-sm); margin-top: 2px; color: var(--color-muted); }
 .quote-status {
   display: inline-flex;
   align-items: center;
@@ -363,8 +377,8 @@ body {
   white-space: nowrap;
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.ok { background: #52c41a; }
-.dot.busy { background: #faad14; }
+.dot.ok { background: var(--status-ok); }
+.dot.busy { background: var(--status-busy); }
 .dot.fail { background: var(--color-danger); }
 .offline-tip {
   background: var(--warn2-bg);
@@ -383,8 +397,8 @@ body {
 } /* 覆盖 .btn-primary 的 32px 固定高，保持提示条内小按钮体量 */
 .tag-est {
   font-size: 10px;
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
+  border: 1px solid var(--info);
+  color: var(--info);
   border-radius: 2px;
   padding: 0 3px;
   margin-left: 3px;
@@ -410,7 +424,7 @@ body {
   vertical-align: 1px;
   white-space: nowrap;
 }
-.nav-date { font-size: 11px; color: var(--color-muted); margin-top: 2px; }
+.nav-date { font-size: var(--fs-xs); color: var(--color-muted); margin-top: 2px; }
 /* ---- 走势弹窗与分析区块 ---- */
 .btn-del {
   border: none;
@@ -469,7 +483,7 @@ body {
 }
 .analysis-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
 .analysis-head b { font-size: 15px; }
-.analysis-head .date { font-size: 12px; color: var(--color-muted); }
+.analysis-head .date { font-size: var(--fs-sm); color: var(--color-muted); }
 .report-text { font-size: 14px; line-height: 1.9; }
 /* 规则报告逐条无序列表：保持与原段落一致的字号/行距，条目间距略收紧 */
 .report-list { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.9; }
@@ -524,7 +538,7 @@ body {
   margin-right: 4px;
   vertical-align: 1px;
 }
-.idxm-dot.open { background: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, .15); }
+.idxm-dot.open { background: var(--status-ok); box-shadow: 0 0 0 3px rgba(22, 163, 74, .15); }
 .idxm-sum { flex: 1; display: none; gap: 6px; align-items: center; overflow: hidden; min-width: 0; }
 .idxm-wrap.is-collapsed .idxm-sum { display: flex; }
 .idxm-chip {
@@ -567,7 +581,7 @@ body {
 }
 .idxm-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
 .idxm-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.idxm-time { font-size: 11px; color: var(--color-muted); white-space: nowrap; }
+.idxm-time { font-size: var(--fs-xs); color: var(--color-muted); white-space: nowrap; }
 .idxm-main { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-top: 3px; }
 .idxm-price { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .idxm-chg { font-size: 14px; font-weight: 600; white-space: nowrap; }
@@ -602,7 +616,7 @@ body {
 .ocr-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ocr-label { font-size: 12px; color: var(--color-muted); }
 .ocr-btn { display: inline-flex; align-items: center; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.ocr-hint { font-size: 11px; color: var(--color-muted); line-height: 1.6; }
+.ocr-hint { font-size: var(--fs-xs); color: var(--color-muted); line-height: 1.6; }
 .ocr-preview {
   max-height: 110px;
   max-width: 100%;
@@ -697,7 +711,7 @@ body {
   flex: none;
 }
 .ocr-batch-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
-.field-hint { font-size: 11px; color: var(--gold); margin-top: 2px; line-height: 1.6; }
+.field-hint { font-size: var(--fs-xs); color: var(--gold); margin-top: 2px; line-height: 1.6; }
 /* ---- AI 今日解读 ---- */
 .analysis-head-right { display: flex; align-items: center; gap: 8px; }
 .ai-block {
@@ -753,7 +767,7 @@ canvas { max-width: 100%; }
 /* 收益率卡片：图表区撑满剩余高度（与右侧日历卡片等高时不留白） */
 .return-card { display: flex; flex-direction: column; }
 .chart-box.return { flex: 1; min-height: 160px; }
-.legend-hint { font-size: 11px; color: var(--color-faint); }
+.legend-hint { font-size: var(--fs-xs); color: var(--color-faint); }
 .chart-card .empty-hint { padding: 24px 14px; }
 
 /* 日历工具栏与视图切换 */
@@ -1051,7 +1065,7 @@ html[data-theme="dark"] .badge.hold { color: #0b0f17; }
 .al-sub { font-size: 11px; color: var(--color-muted); white-space: nowrap; }
 .al-bar { width: 100%; height: 4px; border-radius: 2px; background: var(--color-border); overflow: hidden; }
 .al-bar i { display: block; height: 100%; border-radius: 2px; }
-.al-bar i.ok { background: #16a34a; } .al-bar i.warn { background: #faad14; }
+.al-bar i.ok { background: var(--status-ok); } .al-bar i.warn { background: var(--status-busy); }
 .al-bar i.hot { background: #fa541c; } .al-bar i.over { background: var(--st-sl); }
 .al-bar-note { font-size: 10.5px; color: var(--color-muted); white-space: nowrap; }
 .radar {
@@ -1566,7 +1580,7 @@ html[data-theme="dark"] .sd-radar.orange { color: #e8a35a; background: #2b2013; 
 .health .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--color-faint); }
 .health .pill.ok i { background: #52c41a; }
 .health .pill.fail { border-color: var(--err-line); color: var(--err-ink); }
-.health .pill.fail i { background: #ff4d4f; }
+.health .pill.fail i { background: var(--status-fail); }
 .health .pill .t { color: var(--color-muted); }
 .health-banner {
   margin-bottom: 12px; padding: 7px 12px; border-radius: 8px;
@@ -1860,8 +1874,8 @@ html[data-theme="dark"] .m-cell.selected { background: #2b2013; }
   color: var(--color-muted);
 }
 .ps-tag.ps-est { color: var(--warn-ink, #ad6800); border-color: currentColor; }
-.ps-tag.ps-mixed { color: var(--accent, #1677ff); border-color: currentColor; }
-.ps-tag.ps-done { color: var(--color-up, #1a7f37); border-color: currentColor; }
+.ps-tag.ps-mixed { color: var(--info); border-color: currentColor; }
+.ps-tag.ps-done { color: var(--status-ok); border-color: currentColor; }
 
 /* 本金徽标（自资产总览头部迁至健康条旁） */
 .principal-badges { display: flex; gap: 8px; padding: 0 14px; margin-top: 10px; flex-wrap: wrap; }
@@ -1888,8 +1902,8 @@ html[data-theme="dark"] .m-cell.selected { background: #2b2013; }
 }
 .seg:not(.active):hover:not(:disabled) { border-color: var(--color-primary); color: var(--color-primary); }
 .seg.active {
-  border-color: var(--accent, var(--color-text));
-  color: var(--accent, var(--color-text));
+  border-color: var(--color-primary);
+  color: var(--color-primary);
   font-weight: 700;
 }
 .metrics-row {
