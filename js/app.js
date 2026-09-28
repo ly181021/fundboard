@@ -2328,6 +2328,49 @@ const app = createApp({
         alert('请填写：' + missing.join('、'));
         return;
       }
+      validateFundIdentity().then((problem) => {
+        if (problem) {
+          alert(problem);
+          return;
+        }
+        doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested });
+      });
+    }
+
+    /**
+     * 录入身份校验（保存前拦截）：代码必须是 6 位数字；名称与官方名不符时给出明确提示。
+     * 接口失败/离线降级放行（校验是防错，不是可用性门禁）。
+     * @returns {Promise<string|null>} 拦截提示文案；null = 通过
+     */
+    async function validateFundIdentity() {
+      const code = String(snapshotForm.code).trim();
+      if (!/^\d{6}$/.test(code)) {
+        return `基金代码须为 6 位数字（当前「${code}」）——请核对后重填`;
+      }
+      if (snapshotEditing.value) return null; // 编辑模式只改持仓数值，身份字段不可改
+      const name = String(snapshotForm.name || '').trim();
+      if (!name) return null; // 名称缺省交给缺项检查；不在此重复拦截
+      try {
+        const res = await fetch(`/api/fund-names?codes=${code}`, { headers: apiHeaders() });
+        if (!res.ok) return null;
+        const official = (await res.json()).names?.[code];
+        if (!official) {
+          return `未查到代码 ${code} 的官方基金——请确认代码无误（可能输错位数）`;
+        }
+        if (official !== name) {
+          const confirmUse = window.confirm(
+            `名称与官方不符：\n您填的：${name}\n官方名：${official}\n\n点「确定」用官方名保存，点「取消」返回修改`,
+          );
+          if (confirmUse) snapshotForm.name = official;
+          return confirmUse ? null : '已取消保存——请核对名称后重试';
+        }
+        return null;
+      } catch {
+        return null; // 离线/接口失败：放行（校验降级，不阻断录入）
+      }
+    }
+
+    function doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested }) {
       if (snapshotEditing.value) {
         // 编辑模式：快照原地更新（id/交易记录/策略配置都不动），新本金即时刷新策略徽章
         const fund = data.assets.find((a) => a.id === snapshotEditing.value);
@@ -3245,7 +3288,7 @@ const app = createApp({
             <span>昨日 <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
             <span v-if="stripDateLabel" class="ps-date">{{ stripDateLabel }}</span>
             <span class="ps-flex"></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask"><svg v-if="summaryHidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="20" x2="20" y2="4"/></svg><svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
         </div>
         <div v-if="quoteStatus === 'failed'" class="offline-tip sys-tip">
@@ -3763,7 +3806,7 @@ ${STRATEGY_CFG_MODAL}
           <div class="sp3-head" role="button" tabindex="0" :aria-expanded="String(!summaryCollapsed)" aria-label="收益总览，点击折叠或展开" @click="onSummaryHeadClick" @keydown.enter="onSummaryHeadKey" @keydown.space="onSummaryHeadKey">
             <span class="sp3-title">收益总览</span>
             <span class="sp-sum">总资产 <b>{{ portfolio.total.value != null ? maskText(formatMoney(portfolio.total.value), summaryHidden) : '待更新' }}</b> · 累计 <b>{{ portfolio.total.cumulativeProfit != null ? maskText(formatMoney(portfolio.total.cumulativeProfit), summaryHidden) : '—' }}</b></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask"><svg v-if="summaryHidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="20" x2="20" y2="4"/></svg><svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             <button type="button" class="sp-fold-btn" :title="summaryCollapsed ? '展开' : '收起'" @click.stop="summaryCollapsed = !summaryCollapsed"><span class="t-open">收起</span><span class="t-closed">展开</span><span class="chev">▲</span></button>
           </div>
           <div v-show="!summaryCollapsed" class="sp3-body"><div class="sp3-in hero">
