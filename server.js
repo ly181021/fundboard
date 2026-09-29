@@ -39,6 +39,9 @@ const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
 const OCR_CONFIG_PATH = process.env.OCR_CONFIG_PATH || join(ROOT, 'ocr.config.json');
 // AI 解读请求超时（毫秒）：网关/网络挂住时的兜底，默认 60s，ANALYSIS_TIMEOUT_MS 可覆盖
 const ANALYSIS_TIMEOUT_MS = Number(process.env.ANALYSIS_TIMEOUT_MS) || 60000;
+// push2 熔断冷却（分钟）：基准 15 起每次失败翻倍、封顶 360（6 小时），注入 createDatasource
+const PUSH2_COOLDOWN_MIN = process.env.PUSH2_COOLDOWN_MIN || 15;
+const PUSH2_COOLDOWN_MAX_MIN = process.env.PUSH2_COOLDOWN_MAX_MIN || 360;
 
 // 局域网暴露必须配 token，防止财务数据在内网暴露
 if (HOST === '0.0.0.0' && !APP_TOKEN) {
@@ -63,6 +66,8 @@ const MIME = {
 // 数据源健康：recordSource 埋点 → source_health.json（服务端单写方，写隔离红线）
 const sourceHealth = createSourceHealth({ dataDir: DATA_DIR });
 const datasource = createDatasource({
+  push2CooldownMin: PUSH2_COOLDOWN_MIN,
+  push2CooldownMaxMin: PUSH2_COOLDOWN_MAX_MIN,
   recordSource: (key, ok, err, meta) => {
     sourceHealth.record(key, ok, err, meta).catch(() => {});
   }, // 埋点失败不反噬业务
