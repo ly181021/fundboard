@@ -330,7 +330,7 @@ const app = createApp({
         })
         .catch((e) => {
           if (e.conflict) {
-            alert('服务端数据已被其他窗口修改，请刷新页面后再操作（本机改动可先"导出"备份）');
+            alert('服务端数据已被其他窗口修改，请刷新页面后再操作（本机改动可先「导出」备份）');
           } else {
             pendingSync.value = true;
           }
@@ -377,6 +377,7 @@ const app = createApp({
     }
 
     function openTxModal(f) {
+      openModalFocus('.modal-overlay [data-modal="tx"]');
       txModal.value = {
         fundId: f.id,
         name: f.name,
@@ -1021,7 +1022,22 @@ const app = createApp({
     const navModal = ref(null); // { fund, loading, error, range, series, tab }
     const navCanvas = ref(null);
 
+    // 弹窗焦点管理：打开时聚焦弹窗容器（键盘流从弹窗内开始 Tab），关闭时还原触发点
+    let lastModalTrigger = null;
+    function openModalFocus(selector) {
+      lastModalTrigger = document.activeElement;
+      nextTick(() => document.querySelector(selector)?.focus());
+    }
+    function closeModalRestore() {
+      if (lastModalTrigger instanceof HTMLElement) lastModalTrigger.focus();
+      lastModalTrigger = null;
+    }
+    /** 主表行键盘入口：Enter/Space 等价行点击（净值弹窗） */
+    function fundRowKeydown(e, r) {
+      if (e.key === 'Enter' || e.key === ' ') openNavModal(r);
+    }
     async function openNavModal(f) {
+      openModalFocus('.modal-overlay [data-modal="nav"]');
       navModal.value = { fund: f, loading: true, error: null, range: 30, series: [], tab: 'nav' };
       const r = await quoteService.fetchHistory(f.code, 90);
       if (!navModal.value || navModal.value.fund.code !== f.code) return; // 已关闭/切换
@@ -1520,6 +1536,7 @@ const app = createApp({
       return `${pad(t.getHours())}:${pad(t.getMinutes())}`;
     }
     function closeEstimateBoard() {
+      closeModalRestore();
       estimateBoardCode.value = null;
       estRefreshErr.value = '';
       // 曲线状态与 30 秒心跳一并收掉（否则关闭后 setInterval 永久空转）
@@ -1537,6 +1554,7 @@ const app = createApp({
       curveErr.value = null;
       curveTip.value = null;
       curveMetric.value = 'pct';
+      openModalFocus('.modal-overlay [data-modal="estimate"]');
       startCurveClock();
       measureCurveWidth(); // 先给保底宽度
       nextTick(measureCurveWidth); // 弹窗挂载后再实测
@@ -1558,6 +1576,9 @@ const app = createApp({
     // 基金被删/不在持仓 → 自动收起（不留下指向不存在基金的面板）
     watch(fundStates, () => {
       if (estimateBoardCode.value && !estimateBoardFund.value) closeEstimateBoard();
+    });
+    watch([navModal, txModal], ([nav, tx], [prevNav, prevTx]) => {
+      if ((prevNav && !nav) || (prevTx && !tx)) closeModalRestore();
     });
 
     // ---- 实时估值盘 · 当天估值走势 ----
@@ -2200,12 +2221,19 @@ const app = createApp({
       const shares = parseFloat(tradeForm.shares);
       const tx = { type: tradeForm.type, date: tradeForm.date };
       if (tradeForm.type === 'buy') {
-        if (!Number.isFinite(amount) || !Number.isFinite(shares)) {
-          alert('请填写买入金额和买入份额');
+        if (!Number.isFinite(amount)) {
+          alert('请填写买入金额');
           return;
         }
         tx.amount = amount;
-        tx.shares = shares;
+        // 份额选填：当日买入净值未公布时算不出份额（金额÷净值），可先记金额，
+        // 交易列表会标「份额待补」——净值公布后点「编辑」补上即自动重算成本价
+        if (Number.isFinite(shares) && shares > 0) {
+          tx.shares = shares;
+        } else if (Number.isFinite(shares)) {
+          alert('份额无效（须为正数）——留空即按「份额待补」处理');
+          return;
+        }
       } else if (tradeForm.type === 'sell') {
         if (!Number.isFinite(shares)) {
           alert('请填写卖出份额');
@@ -2228,6 +2256,24 @@ const app = createApp({
           tx.amount = amount;
         }
       }
+      // 买入隐含净值合理性校验（防乱写份额）：隐含净值 = 金额÷份额，与最新确认净值偏差
+      // 超过 15% 给确认机会——当日按昨日净值估算本就有小幅偏差，超阈值通常是份额填错；
+      // 确认则尊重用户（他可能按自己预估算），取消返回修改；离线/无净值数据跳过（校验降级）
+      if (tx.type === 'buy' && tx.shares != null) {
+        const refNav = Number(quotesMap.value[fund.code]?.nav);
+        if (Number.isFinite(refNav) && refNav > 0) {
+          const implied = tx.amount / tx.shares;
+          const dev = Math.abs(implied - refNav) / refNav;
+          if (dev > 0.15) {
+            const ok = confirm(
+              `份额与金额可能对不上：\n按「${tx.amount} 元 ÷ ${tx.shares} 份」反算的净值是 ${implied.toFixed(4)}，` +
+                `与最新确认净值 ${refNav.toFixed(4)} 偏差 ${(dev * 100).toFixed(1)}%。\n` +
+                `（当日买入按昨日净值估算属正常小偏差，超过 15% 通常是份额填错）\n仍要保存吗？`,
+            );
+            if (!ok) return;
+          }
+        }
+      }
       if (txEdit.value) {
         // 编辑模式：替换原记录（非追加）
         fund.transactions.splice(txEdit.value.idx, 1, tx);
@@ -2245,6 +2291,12 @@ const app = createApp({
       persist();
       showTradeForm.value = false;
       resetTradeForm(); // 保存后同样收敛到干净态（与打开入口共用同一重置）
+      // 当日买入无份额（净值未公布）：提示补份额路径（交易列表 → 编辑）
+      if (tx.type === 'buy' && tx.shares == null) {
+        antd.message.success(
+          '买入已记录——份额待确认（净值公布后，在「记录」里点该笔「编辑」补上即可）',
+        );
+      }
     }
 
     const showSnapshotForm = ref(false);
@@ -2271,6 +2323,45 @@ const app = createApp({
       const v = parseFloat(snapshotForm.costPrice) * parseFloat(snapshotForm.holdShares);
       return Number.isFinite(v) ? (Math.round(v * 100) / 100).toLocaleString('zh-CN') : '—';
     });
+
+    // ---- 录入/导入输入联动：名称↔代码自动互补（fund-search 保守消歧，与 OCR 补码同款能力）----
+    const fundLink = { seq: 0, timer: null, lastQueried: '' };
+    /** 防抖 400ms 触发联动；编辑模式身份字段只读，无需联动 */
+    function scheduleFundLink(source) {
+      if (snapshotEditing.value) return;
+      clearTimeout(fundLink.timer);
+      fundLink.timer = setTimeout(() => runFundLink(source), 400);
+    }
+    /**
+     * 拿另一字段的当前值查 /api/fund-search，用 pickFundCode 保守消歧后回填空着的另一字段。
+     * 只填空字段、绝不覆盖已输入内容；候选无把握（无精确/多义）留空手填；离线静默跳过。
+     * @param {'name'|'code'} source 触发源字段（互补另一侧）
+     */
+    async function runFundLink(source) {
+      fundLink.seq += 1;
+      const seq = fundLink.seq;
+      const query = String(source === 'name' ? snapshotForm.name : snapshotForm.code).trim();
+      if (!query || query === fundLink.lastQueried) return;
+      fundLink.lastQueried = query;
+      let results = [];
+      try {
+        const res = await fetch(`/api/fund-search?key=${encodeURIComponent(query)}`, {
+          headers: apiHeaders(),
+        });
+        if (res.ok) results = (await res.json()).results ?? [];
+      } catch {
+        return; // 离线/接口失败：静默，不打断录入
+      }
+      if (seq !== fundLink.seq) return; // 迟到响应丢弃（用户又输入了）
+      if (source === 'name') {
+        const code = pickFundCode(query, results);
+        if (code && !snapshotForm.code.trim()) snapshotForm.code = code;
+        return;
+      }
+      // 按代码查：fund-search 对 6 位代码返回精确候选，取官方名回填空名称
+      const exact = results.find((r) => String(r.code) === query);
+      if (exact?.name && !snapshotForm.name.trim()) snapshotForm.name = exact.name;
+    }
 
     /** 编辑已有基金的持仓快照（本金修正入口） */
     function openSnapshotEdit(f) {
@@ -2307,6 +2398,49 @@ const app = createApp({
         alert('请填写：' + missing.join('、'));
         return;
       }
+      validateFundIdentity().then((problem) => {
+        if (problem) {
+          alert(problem);
+          return;
+        }
+        doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested });
+      });
+    }
+
+    /**
+     * 录入身份校验（保存前拦截）：代码必须是 6 位数字；名称与官方名不符时给出明确提示。
+     * 接口失败/离线降级放行（校验是防错，不是可用性门禁）。
+     * @returns {Promise<string|null>} 拦截提示文案；null = 通过
+     */
+    async function validateFundIdentity() {
+      const code = String(snapshotForm.code).trim();
+      if (!/^\d{6}$/.test(code)) {
+        return `基金代码须为 6 位数字（当前「${code}」）——请核对后重填`;
+      }
+      if (snapshotEditing.value) return null; // 编辑模式只改持仓数值，身份字段不可改
+      const name = String(snapshotForm.name || '').trim();
+      if (!name) return null; // 名称缺省交给缺项检查；不在此重复拦截
+      try {
+        const res = await fetch(`/api/fund-names?codes=${code}`, { headers: apiHeaders() });
+        if (!res.ok) return null;
+        const official = (await res.json()).names?.[code];
+        if (!official) {
+          return `未查到代码 ${code} 的官方基金——请确认代码无误（可能输错位数）`;
+        }
+        if (official !== name) {
+          const confirmUse = window.confirm(
+            `名称与官方不符：\n您填的：${name}\n官方名：${official}\n\n点「确定」用官方名保存，点「取消」返回修改`,
+          );
+          if (confirmUse) snapshotForm.name = official;
+          return confirmUse ? null : '已取消保存——请核对名称后重试';
+        }
+        return null;
+      } catch {
+        return null; // 离线/接口失败：放行（校验降级，不阻断录入）
+      }
+    }
+
+    function doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested }) {
       if (snapshotEditing.value) {
         // 编辑模式：快照原地更新（id/交易记录/策略配置都不动），新本金即时刷新策略徽章
         const fund = data.assets.find((a) => a.id === snapshotEditing.value);
@@ -2403,7 +2537,9 @@ const app = createApp({
           data.assets.splice(0, data.assets.length, ...imported.assets);
           persist();
         } catch (err) {
-          alert('导入失败：JSON 格式错误');
+          alert(
+            '导入失败：无法识别为有效的 JSON 备份（需含 assets 字段）。请用工具栏「导出」生成的文件再试。',
+          );
         }
       };
       reader.readAsText(file);
@@ -2512,6 +2648,10 @@ const app = createApp({
               name: idx.name,
               priceText: idx.price?.toFixed(2) ?? '—',
               chgText: pctVal == null ? '—' : `${pctVal > 0 ? '+' : ''}${pctVal.toFixed(2)}%`,
+              amtText:
+                idx.change_amt == null || pctVal == null
+                  ? null
+                  : `${idx.change_amt > 0 ? '+' : ''}${idx.change_amt.toFixed(2)}`,
               chgColor: profitColor(pctVal),
               timeText: formatIndexTime(idx.time),
               open: indexStatus.value[marketOfIndex(idx.code)], // 海外指数白名单映射（marketClock）——老的 A 股/港股两分支不覆盖美股，会错拿 A 股窗口
@@ -3002,6 +3142,7 @@ const app = createApp({
       navModal,
       navCanvas,
       openNavModal,
+      fundRowKeydown,
       navSeries,
       navRangeChange,
       setRange,
@@ -3161,6 +3302,7 @@ const app = createApp({
       snapshotEditing,
       snapshotCostMismatch,
       snapshotAutoInvested,
+      scheduleFundLink,
       openSnapshotEdit,
       maskText,
       summaryHidden,
@@ -3217,7 +3359,7 @@ const app = createApp({
             <span>昨日 <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
             <span v-if="stripDateLabel" class="ps-date">{{ stripDateLabel }}</span>
             <span class="ps-flex"></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示资产数字' : '隐藏资产数字（防窥）'" @click.stop="toggleMask">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask"><svg v-if="summaryHidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="20" x2="20" y2="4"/></svg><svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
         </div>
         <div v-if="quoteStatus === 'failed'" class="offline-tip sys-tip">
@@ -3247,7 +3389,7 @@ const app = createApp({
         <div class="action-group">
           <span class="quote-status">
             <span :class="['dot', quoteStatus === 'ok' ? 'ok' : quoteStatus === 'loading' ? 'busy' : 'fail']"></span>
-            {{ quoteStatus === 'ok' ? '已更新 ' + quoteFetchedAt : quoteStatus === 'loading' ? '更新中…' : '行情失败' }}
+            {{ quoteStatus === 'ok' ? '行情 ' + quoteFetchedAt : quoteStatus === 'loading' ? '更新中…' : '行情失败' }}
           </span>
           <button class="btn-secondary" @click="refreshQuotes" :disabled="quoteStatus === 'loading'">刷新行情</button>
           <button class="btn-secondary" @click="exportData">导出</button>
@@ -3269,7 +3411,7 @@ const app = createApp({
           :scroll="{ x: 'max-content' }"
           :row-key="r => r.id"
           size="middle"
-          :custom-row="r => ({ onClick: () => openNavModal(r) })"
+          :custom-row="r => ({ onClick: () => openNavModal(r), tabindex: 0, onKeydown: (e) => fundRowKeydown(e, r) })"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'name'">
@@ -3277,22 +3419,22 @@ const app = createApp({
               <div class="fund-code">{{ record.code }}</div>
             </template>
             <template v-else-if="column.key === 'principal'">
-              {{ formatMoney(record.state.totalInvested) }}
+              {{ maskText(formatMoney(record.state.totalInvested), summaryHidden) }}
             </template>
             <template v-else-if="column.key === 'daily'">
               <!-- 当日列：上面收益、下面涨幅（合并展示）；净值未发布到当天时显示待更新。
                    整列可点 → 实时估值盘（估值中/已更新/净值滞后/待更新 四种状态面板按状态分支） -->
               <div class="cell-est" title="查看实时估值盘（估值净值与确认净值明细）" @click.stop="openEstimateBoard(record)">
                 <div>
-                  <span v-if="record.state.dayProfit != null" :style="{ color: profitColor(record.state.dayProfit) }">
-                    {{ formatMoney(record.state.dayProfit) }}
+                  <span v-if="record.state.dayProfit != null" class="d-main" :style="summaryHidden ? {} : { color: profitColor(record.state.dayProfit) }">
+                    {{ maskText(formatMoney(record.state.dayProfit), summaryHidden) }}
                   </span>
                   <span v-else class="muted">待更新</span>
                 </div>
                 <div class="nav-date">
                   <template v-if="record.state.dayChangePct != null">
-                    <span :style="{ color: profitColor(record.state.dayChangePct) }">
-                      {{ record.state.dayChangePct > 0 ? '+' : '' }}{{ record.state.dayChangePct.toFixed(2) }}%
+                    <span :style="summaryHidden ? {} : { color: profitColor(record.state.dayChangePct) }">
+                      {{ maskText((record.state.dayChangePct > 0 ? '+' : '') + record.state.dayChangePct.toFixed(2) + '%', summaryHidden) }}
                     </span>
                     <span v-if="record.state.mode === 'estimate'" class="tag-est">估</span>
                     <span v-else-if="record.state.dataDate === todayStr()" class="tag-confirmed">已更新</span>
@@ -3305,18 +3447,18 @@ const app = createApp({
             <template v-else-if="column.key === 'yesterday'">
               <!-- 取值与汇总层同口径回退（prevDayProfit ?? dailyProfit）：周末/长假/周一盘前
                    prevDayProfit 为 null，显示的是「最近净值日」单日变动——列标题此时显示为「上一净值日」 -->
-              <span v-if="prevDayProfitOf(record.state) != null" :style="{ color: profitColor(prevDayProfitOf(record.state)) }">
-                {{ formatMoney(prevDayProfitOf(record.state)) }}
+              <span v-if="prevDayProfitOf(record.state) != null" :style="summaryHidden ? {} : { color: profitColor(prevDayProfitOf(record.state)) }">
+                {{ maskText(formatMoney(prevDayProfitOf(record.state)), summaryHidden) }}
               </span>
               <span v-else class="muted">待更新</span>
               <span v-if="navIsLagged(record.state)" class="tag-lag" :title="'净值更新滞后：当日/昨日按 ' + record.state.navDate + ' 口径'">净值 {{ record.state.navDate.slice(5) }}</span>
             </template>
             <template v-else-if="column.key === 'hold'">
-              <span :style="{ color: profitColor(record.state.holdProfit) }">
-                {{ formatMoney(record.state.holdProfit) }}
+              <span class="d-main" :style="summaryHidden ? {} : { color: profitColor(record.state.holdProfit) }">
+                {{ maskText(formatMoney(record.state.holdProfit), summaryHidden) }}
               </span>
               <div v-if="record.state.returnRate != null" class="nav-date">
-                {{ pctText(record.state.returnRate) }}<template v-if="record.state.xirr != null"> · 年化 {{ pctText(record.state.xirr) }}</template>
+                {{ maskText(pctText(record.state.returnRate), summaryHidden) }}<template v-if="record.state.xirr != null"> · 年化 {{ maskText(pctText(record.state.xirr), summaryHidden) }}</template>
               </div>
             </template>
             <template v-else-if="column.key === 'alert'">
@@ -3378,7 +3520,7 @@ const app = createApp({
         <div class="analysis-head">
           <b>策略触发记录</b>
           <span class="analysis-head-right">
-            <span class="date">触发即留痕 · 可回看"当时为什么喊你操作"</span>
+            <span class="date">触发即留痕 · 可回看「当时为什么喊你操作」</span>
             <button class="btn-mini" :disabled="strategyStatus.loading" @click="runStrategyNow">{{ strategyStatus.loading ? '巡检中…' : '立即巡检' }}</button>
           </span>
         </div>
@@ -3386,7 +3528,7 @@ const app = createApp({
       </div>
 
       <div v-if="navModal" class="modal-overlay" @click.self="navModal = null">
-        <div class="modal modal-wide">
+        <div class="modal modal-wide" data-modal="nav" tabindex="-1">
           <div class="modal-header">
             <div class="m-title">
               <span class="t">{{ navModal.fund.name }}（{{ navModal.fund.code }}）</span>
@@ -3414,7 +3556,7 @@ const app = createApp({
                 <span class="metric-tag info">最新净值 {{ navModal.fund.state.latestNav ?? '—' }}（{{ navModal.fund.state.navDate ?? '—' }}）</span>
                 <span v-if="navRangeChange" class="metric-tag info">区间涨幅 {{ navRangeChange }}</span>
                 <span v-if="navDrawdown" class="metric-tag info">近90日最大回撤 {{ navDrawdown }}</span>
-                <span v-if="navModal.fund.state.xirr != null" class="metric-tag info">年化(XIRR) {{ pctText(navModal.fund.state.xirr) }}</span>
+                <span v-if="navModal.fund.state.xirr != null" class="metric-tag info">年化(XIRR) {{ maskText(pctText(navModal.fund.state.xirr), summaryHidden) }}</span>
               </div>
             </template>
           </template>
@@ -3424,7 +3566,7 @@ const app = createApp({
             <template v-else>
               <div class="chart-box"><canvas ref="navCanvas"></canvas></div>
               <div class="chart-foot">
-                <span class="metric-tag info">最新持有收益 {{ navHoldingLatest != null ? formatMoney(navHoldingLatest) : '—' }}</span>
+                <span class="metric-tag info">最新持有收益 {{ navHoldingLatest != null ? maskText(formatMoney(navHoldingLatest), summaryHidden) : '—' }}</span>
               </div>
             </template>
           </template>
@@ -3435,7 +3577,7 @@ const app = createApp({
            整列可点，面板按 state.mode/dataDate 分支（估值中 / 已更新 / 净值滞后到账 / 待更新）；
            数字随页面 60s 轮询自动更新（视图模型读 quotesMap），另有单只刷新按钮 -->
       <div v-if="estimateBoardCode" class="modal-overlay" @click.self="closeEstimateBoard()">
-        <div class="modal modal-wide" @click="onPanelClick">
+        <div class="modal modal-wide" data-modal="estimate" tabindex="-1" @click="onPanelClick">
           <div class="modal-header">
             <span>{{ estimateBoardView?.name ?? '' }}（{{ estimateBoardCode }}）· 实时估值盘</span>
             <button type="button" class="modal-close" aria-label="关闭" @click="closeEstimateBoard()">✕</button>
@@ -3456,15 +3598,15 @@ const app = createApp({
               </div>
               <div class="est-box">
                 <div class="l">{{ estimateBoardView.mainIsEstimate ? '估算当日盈亏' : '当日盈亏' }}</div>
-                <div class="v" :style="{ color: profitColor(estimateBoardView.dayProfit) }">{{ estimateBoardView.dayProfit != null ? formatMoney(estimateBoardView.dayProfit) : '—' }}</div>
+                <div class="v" :style="summaryHidden ? {} : { color: profitColor(estimateBoardView.dayProfit) }">{{ estimateBoardView.dayProfit != null ? maskText(formatMoney(estimateBoardView.dayProfit), summaryHidden) : '—' }}</div>
                 <div class="s">持有份额 {{ estimateBoardView.holdShares != null ? estimateBoardView.holdShares.toFixed(2) : '—' }} · 持有收益
-                  <span :style="{ color: profitColor(estimateBoardView.holdProfit) }">{{ estimateBoardView.holdProfit != null ? formatMoney(estimateBoardView.holdProfit) : '—' }}</span>
+                  <span :style="summaryHidden ? {} : { color: profitColor(estimateBoardView.holdProfit) }">{{ estimateBoardView.holdProfit != null ? maskText(formatMoney(estimateBoardView.holdProfit), summaryHidden) : '—' }}</span>
                 </div>
               </div>
               <div class="est-box">
                 <div class="l">{{ estimateBoardView.mainIsEstimate ? '估算市值' : '市值' }}</div>
-                <div class="v">{{ estimateBoardView.marketValue != null ? formatMoney(estimateBoardView.marketValue) : '—' }}</div>
-                <div class="s">累计投入 {{ estimateBoardView.totalInvested != null ? formatMoney(estimateBoardView.totalInvested) : '—' }}</div>
+                <div class="v">{{ estimateBoardView.marketValue != null ? maskText(formatMoney(estimateBoardView.marketValue), summaryHidden) : '—' }}</div>
+                <div class="s">累计投入 {{ estimateBoardView.totalInvested != null ? maskText(formatMoney(estimateBoardView.totalInvested), summaryHidden) : '—' }}</div>
               </div>
               <div class="est-box">
                 <div class="l">最近确认净值</div>
@@ -3502,7 +3644,7 @@ const app = createApp({
               </div>
               <div v-if="curveNote" class="curve-note">{{ curveNote }}</div>
               <div class="curve-note">
-                ⚠ 曲线为<b>新浪估算</b>（口径2），与上方大数字（主源天天基金）是两套算法，末尾可能差零点几个百分点；两者都属“盘中参考”，官方净值以基金公司晚间公布为准。
+                ⚠ 曲线为<b>新浪估算</b>（口径2），与上方大数字（主源天天基金）是两套算法，末尾可能差零点几个百分点；两者都属「盘中参考」，官方净值以基金公司晚间公布为准。
               </div>
             </div>
             <div class="est-meta">
@@ -3521,7 +3663,7 @@ const app = createApp({
       </div>
 
       <div v-if="txModal" class="modal-overlay" @click.self="txModal = null">
-        <div class="modal modal-wide">
+        <div class="modal modal-wide" data-modal="tx" tabindex="-1">
           <div class="modal-header">
             <span>{{ txModal.name }}（{{ txModal.code }}）· 交易记录</span>
             <button type="button" class="modal-close" aria-label="关闭" @click="txModal = null">✕</button>
@@ -3544,10 +3686,14 @@ const app = createApp({
                   <span :class="record.tx.type === 'buy' ? 'up' : record.tx.type === 'sell' ? 'down' : 'muted'">{{ txLabel(record.tx) }}</span>
                 </template>
                 <template v-else-if="column.key === 'amount'">
-                  {{ record.tx.amount != null ? formatMoney(record.tx.amount) : '—' }}
+                  {{ record.tx.amount != null ? maskText(formatMoney(record.tx.amount), summaryHidden) : '—' }}
                 </template>
                 <template v-else-if="column.key === 'shares'">
-                  {{ record.tx.shares != null ? record.tx.shares : '—' }}
+                  <template v-if="record.tx.shares != null">{{ record.tx.shares }}</template>
+                  <template v-else-if="record.tx.type === 'buy' && record.tx.amount != null">
+                    <span class="tag-est" title="当日买入净值未公布，份额待确认——净值公布后点「编辑」补上">份额待补</span>
+                  </template>
+                  <template v-else>—</template>
                 </template>
                 <template v-else-if="column.key === 'actions'">
                   <button class="btn-mini" @click="editTx(record)">编辑</button>
@@ -3668,12 +3814,12 @@ ${STRATEGY_CFG_MODAL}
           <div class="form-grid">
             <div class="form-field">
               <label>基金名称</label>
-              <input type="text" v-model="snapshotForm.name" placeholder="沪深300指数" :disabled="!!snapshotEditing">
+              <input type="text" v-model="snapshotForm.name" placeholder="沪深300指数" :disabled="!!snapshotEditing" @input="scheduleFundLink('name')">
               <div v-if="snapshotEditing" class="field-hint">编辑模式锁定（改名/改码=换基金，请删除后重录）</div>
             </div>
             <div class="form-field">
               <label>基金代码</label>
-              <input type="text" v-model="snapshotForm.code" placeholder="110020" :disabled="!!snapshotEditing">
+              <input type="text" v-model="snapshotForm.code" placeholder="110020" :disabled="!!snapshotEditing" @input="scheduleFundLink('code')">
             </div>
             <div class="form-field">
               <label>持有金额（元）</label>
@@ -3735,7 +3881,7 @@ ${STRATEGY_CFG_MODAL}
           <div class="sp3-head" role="button" tabindex="0" :aria-expanded="String(!summaryCollapsed)" aria-label="收益总览，点击折叠或展开" @click="onSummaryHeadClick" @keydown.enter="onSummaryHeadKey" @keydown.space="onSummaryHeadKey">
             <span class="sp3-title">收益总览</span>
             <span class="sp-sum">总资产 <b>{{ portfolio.total.value != null ? maskText(formatMoney(portfolio.total.value), summaryHidden) : '待更新' }}</b> · 累计 <b>{{ portfolio.total.cumulativeProfit != null ? maskText(formatMoney(portfolio.total.cumulativeProfit), summaryHidden) : '—' }}</b></span>
-            <button type="button" class="icon-btn" :title="summaryHidden ? '显示资产数字' : '隐藏资产数字（防窥）'" @click.stop="summaryHidden = !summaryHidden">{{ summaryHidden ? '🙈' : '👁' }}</button>
+            <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask"><svg v-if="summaryHidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="20" x2="20" y2="4"/></svg><svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             <button type="button" class="sp-fold-btn" :title="summaryCollapsed ? '展开' : '收起'" @click.stop="summaryCollapsed = !summaryCollapsed"><span class="t-open">收起</span><span class="t-closed">展开</span><span class="chev">▲</span></button>
           </div>
           <div v-show="!summaryCollapsed" class="sp3-body"><div class="sp3-in hero">
@@ -3797,7 +3943,7 @@ ${STRATEGY_CFG_MODAL}
              v-if="analysis" 守卫：analysis 在 quoteStatus≠ok / 无持仓时为 null，
              模板裸解引用会让根组件渲染抛错 → 整页白屏（直链 #/returns 首帧、60s 轮询在途期间必现） -->
         <div v-if="analysis" class="chart-card m-block">
-          <div class="chart-head"><b>当日盈亏归因</b><span class="hint">数据日期：{{ analysis.dataDate === analysis.today ? '当日（最近净值日）' : '最新净值日 ' + (analysis.dataDate || '').slice(5) }}</span><span class="ctl-label">金额排序：</span><button class="seg" :class="{ active: !attrSortDesc }" @click="setAttrSort(false)">升序</button><button class="seg" :class="{ active: attrSortDesc }" @click="setAttrSort(true)">降序</button></div>
+          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈亏归因' : '最新净值日盈亏归因' }}</b><span class="hint">数据日期：{{ analysis.dataDate === analysis.today ? '当日（最近净值日）' : '最新净值日 ' + (analysis.dataDate || '').slice(5) }}</span><span class="ctl-label">金额排序：</span><button class="seg" :class="{ active: !attrSortDesc }" @click="setAttrSort(false)">升序</button><button class="seg" :class="{ active: attrSortDesc }" @click="setAttrSort(true)">降序</button></div>
           <div v-if="analysis.attributionRows.length > 0" class="attr-block">
             <div v-for="row in analysis.attributionRows" :key="row.name" class="attr-row">
               <span class="attr-name">{{ row.name }}</span>
@@ -3812,7 +3958,7 @@ ${STRATEGY_CFG_MODAL}
           </div>
         </div>
         <div v-else class="chart-card m-block">
-          <div class="chart-head"><b>当日盈亏归因</b><span class="hint">数据日期：—</span></div>
+          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈亏归因' : '最新净值日盈亏归因' }}</b><span class="hint">数据日期：—</span></div>
           <div class="empty-hint">行情数据加载中或暂无持仓：数据到位后自动生成归因</div>
         </div>
 
@@ -3830,7 +3976,7 @@ ${STRATEGY_CFG_MODAL}
               <div class="cal-weekdays"><span v-for="w in ['一','二','三','四','五','六','日']" :key="w">{{ w }}</span></div>
               <div class="cal-mgrid">
                 <template v-for="(c, i) in calMonthCells.cells" :key="i">
-                  <div v-if="!c.blank" class="m-cell" :class="[{ today: c.isToday, selected: c.isSelected, tx: c.hasTx }, c.amount > 0 ? 'pos' + c.level : (c.amount < 0 ? 'neg' + c.level : '')]" :title="c.date + (c.amount != null ? ' · ' + signed(c.amount) : '') + calMarkerLabel(c)" @click="pickDay(c)">
+                  <div v-if="!c.blank" class="m-cell" :class="[{ today: c.isToday, selected: c.isSelected, tx: c.hasTx }, c.amount > 0 ? 'pos' + c.level : (c.amount < 0 ? 'neg' + c.level : '')]" :title="c.date + (c.amount != null ? ' · ' + signed(c.amount) : '') + calMarkerLabel(c)" tabindex="0" @click="pickDay(c)" @keydown.enter="pickDay(c)">
                     <div class="d"><em>{{ c.day }}</em></div>
                     <div class="amt" :class="{ none: c.amount == null }" :style="{ color: c.amount > 0 ? 'var(--color-up)' : c.amount < 0 ? 'var(--color-down)' : '' }">{{ signed(c.amount) }}</div>
                   </div>

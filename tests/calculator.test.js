@@ -11,6 +11,18 @@ test('买入：本金和份额增加，成本价重算', () => {
   assert.equal(result.costPrice, 1600 / 1500);
 });
 
+test('买入：份额缺失（当日买入净值未公布）视为 0——本金照记、成本价暂虚高，补份额后重算修正', () => {
+  const state = { totalInvested: 1000, holdShares: 1000, costPrice: 1.0 };
+  const result = applyBuy(state, { type: 'buy', amount: 600, shares: null });
+  assert.equal(result.totalInvested, 1600, '本金照记（钱已付出）');
+  assert.equal(result.holdShares, 1000, '份额不动（待补）');
+  assert.equal(result.costPrice, 1.6, '成本价暂虚高（1600/1000）');
+  // 补份额 500 后重算：成本价回落到真实摊薄
+  const fixed = applyBuy(result, { type: 'buy', amount: 0, shares: 500 });
+  assert.equal(fixed.totalInvested, 1600);
+  assert.equal(fixed.costPrice, 1600 / 1500);
+});
+
 import { applySell } from '../js/calculator.js';
 
 test('卖出：按成本价反推卖出本金，本金和份额等比减少', () => {

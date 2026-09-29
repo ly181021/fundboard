@@ -20,7 +20,7 @@ import {
 // ---- 夹具 ----
 
 const P = (t, nav, change_pct) => ({ t, nav, change_pct });
-/** 默认夹具：点间隔 ≤1 分钟（真实源约 1~2 分钟一点），否则会被"Δt>5min 断笔"规则切成多段 */
+/** 默认夹具：点间隔 ≤1 分钟（真实源约 1~2 分钟一点），否则会被"Δt>10min 断笔"规则切成多段 */
 const CURVE = (over = {}) => ({
   code: '110020',
   market_date: '2026-09-11',
@@ -265,13 +265,17 @@ test('渲染⑧ 零轴对称：上下两档 y 刻度互为相反数', () => {
   assert.equal(ticks[1], v.metrics.pct.lo.toFixed(1) + '%');
 });
 
-test('渲染⑨ 断流：同一半场内相邻点间隔 > 5 分钟 → 断笔（`M` 数 +1）', () => {
+test('渲染⑨ 断流：同一半场内相邻点间隔 > 10 分钟 → 断笔（`M` 数 +1）', () => {
   const dense = V({
     curve: { ...CURVE(), points: [P('10:00', 1.85, -0.5), P('10:03', 1.849, -0.6)] },
   });
   assert.equal(countM(SVG(dense)), 1);
+  const sourceGap = V({
+    curve: { ...CURVE(), points: [P('10:00', 1.85, -0.5), P('10:07', 1.849, -0.6)] },
+  });
+  assert.equal(countM(SVG(sourceGap)), 1); // 新浪源 6~7 分钟缺口为常态，不视为断流
   const gap = V({
-    curve: { ...CURVE(), points: [P('10:00', 1.85, -0.5), P('10:06', 1.849, -0.6)] },
+    curve: { ...CURVE(), points: [P('10:00', 1.85, -0.5), P('10:11', 1.849, -0.6)] },
   });
   assert.equal(countM(SVG(gap)), 2); // 不跨空白直连
 });

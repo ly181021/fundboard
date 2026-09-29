@@ -31,7 +31,7 @@ const PLOT_H = CURVE_LAYOUT.HEIGHT - CURVE_LAYOUT.PT - CURVE_LAYOUT.PB; // 116
 const AM_OPEN_MIN = 570; // 09:30
 const AM_CLOSE_MIN = 690; // 11:30
 const PM_OPEN_MIN = 780; // 13:00
-const GAP_BREAK_MIN = 5; // 相邻点间隔 > 5 分钟视为断流（正常约 1~2 分钟一点）
+const GAP_BREAK_MIN = 10; // 相邻点间隔 > 10 分钟视为断流（正常约 1~2 分钟一点；新浪源分钟点存在 6~7 分钟的天然缺口，阈值须高于缺口上限）
 const HIT_RADIUS = 10; // 命中吸附半径（px）
 const XTICK_INSET = 3; // 中缝两个时间标签各自向外让出的间距（GAP=0 时防"11:3013:00"贴成一句）
 
@@ -240,7 +240,7 @@ export function pnlBlockReason({ shares = null, worthDate = null, marketDate = n
 };
 
 /**
- * 连续有效段（该口径下）：同一半场内相邻点间隔 > 5 分钟（断流）→ 断笔；
+ * 连续有效段（该口径下）：同一半场内相邻点间隔 > 10 分钟（断流）→ 断笔；
  * 跨午休不断笔：上午末点与下午首点
  * 在接缝处同 x（GAP=0），连接段是一条竖直线段，不占用横向时间轴、不伪造任何插值斜率，
  * 只是把"上午收在这里、下午从这里继续"如实连起来（与常见 A 股分时图一致）。

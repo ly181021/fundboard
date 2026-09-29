@@ -543,7 +543,7 @@ export const STRATEGY_CFG_MODAL = `
               <a-button size="small" @click="cfgResetAll">恢复默认</a-button>
               <a-button size="small" @click="cfgBacktestHint">回测此配置</a-button>
               <a-button size="small" @click="cfgCancel">取消</a-button>
-              <a-button size="small" type="primary" :disabled="!cfgCanSave" @click="cfgSave">{{ cfgSafety.ok ? '保 存' : '禁止保存（安全垫）' }}</a-button>
+              <a-button size="small" type="primary" :disabled="!cfgCanSave" @click="cfgSave">{{ cfgSafety.ok ? '保存' : '禁止保存（安全垫）' }}</a-button>
             </div>
           </div>
         </template>
@@ -582,7 +582,7 @@ export const STRATEGY_CFG_MODAL = `
             </div>
             <div :class="['pad-line', cfgSafety.ok ? 'ok' : 'bad']">
               <template v-if="cfgSafety.ok">✓ 安全垫不变量满足：最坏触发价 (1+{{ cfg.values.startProfit }}%)×(1−{{ cfg.values.drawdown }}%) = {{ cfgSafety.price.toFixed(4) }} ≥ {{ cfgSafety.floor.toFixed(4) }}（赎回费 {{ cfg.values.estFee }}% + 最小垫 {{ cfg.values.minMargin }}%）——最坏仍锁利 {{ cfgSafety.marginPct }}%</template>
-              <template v-else>✗ 违反安全垫不变量：最坏触发价 {{ cfgSafety.price.toFixed(4) }} &lt; {{ cfgSafety.floor.toFixed(4) }}——"名为止盈实为保本亏损"。请下调回撤阈值（当前组合 {{ cfg.values.startProfit }}% / {{ cfg.values.drawdown }}% 不允许保存）</template>
+              <template v-else>✗ 违反安全垫不变量：最坏触发价 {{ cfgSafety.price.toFixed(4) }} &lt; {{ cfgSafety.floor.toFixed(4) }}——「名为止盈实为保本亏损」。请下调回撤阈值（当前组合 {{ cfg.values.startProfit }}% / {{ cfg.values.drawdown }}% 不允许保存）</template>
             </div>
             <div class="sec-note">无窗口参数：峰值自启动日起持续跟踪；加仓摊薄跌破启动点会休眠并重置峰值（重新爬上启动点再起算）。</div>
           </a-collapse-panel>
@@ -649,7 +649,7 @@ export const STRATEGY_CFG_MODAL = `
               <div class="fhint">默认 <b>{{ cfgDef(f.key) == null ? '未设置' : cfgDef(f.key) + (f.unit || '') }}</b> · {{ f.src }}</div>
             </div>
             <div v-if="cfg.addEnabled && !cfgIsStable && cfg.values.reserveCash == null" class="sec-note warn">
-              ⚠ 未设置预留资金：加仓建议不会触发。请先填写"预留资金"（不设默认值，用户对自己的预算负责）。
+              ⚠ 未设置预留资金：加仓建议不会触发。请先填写「预留资金」（不设默认值，用户对自己的预算负责）。
             </div>
             <div class="sec-note">三重护栏：默认关闭 · 预算帽（累计加仓 ≤ 启用时本金 × 预算比例，到顶只报"已达上限"）· 金额口径（每次 = 剩余额 ÷ 剩余档数，如 3000 元预算在 −6% 档建议 1000 元）。每次建议附效果预演与风险预演。</div>
           </a-collapse-panel>

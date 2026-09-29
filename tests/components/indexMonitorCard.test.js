@@ -8,6 +8,7 @@ const items = [
     priceText: '4548.05',
     chgText: '-0.10%',
     chgColor: 'var(--color-down)',
+    amtText: '-4.55',
     timeText: '09-04 16:11',
     open: false,
   },
@@ -16,6 +17,7 @@ const items = [
     priceText: '26506.99',
     chgText: '+0.50%',
     chgColor: 'var(--color-up)',
+    amtText: null, // 美股新浪备源无涨跌额（降级单要素）
     timeText: '09-05 04:00',
     open: true,
   },
@@ -33,11 +35,16 @@ test('indexMonitorCardHtml：渲染头部/状态/摘要/卡体，HTML 与展开�
   // 收起/展开双文案 span 都存在（外层 .is-collapsed 类由 CSS 切换，切换时 v-html 不变）
   assert.ok(html.includes('收起') && html.includes('展开'));
   assert.ok(!html.includes('is-collapsed'));
-  // 涨跌色沿用调用方传入的色值（profitColor 的 CSS 变量）
-  assert.ok(
-    html.includes('style="color:var(--color-up)"') &&
-      html.includes('style="color:var(--color-down)"'),
-  );
+});
+
+test('涨跌胶囊：up/dn 类 + ▲▼ + 涨跌额·涨幅双要素，额缺失降级只显示涨幅', () => {
+  const html = indexMonitorCardHtml(items, { status });
+  // 沪深300（-0.10% 有额）→ dn 胶囊双要素；纳斯达克（+0.50% 无额）→ up 胶囊单要素
+  assert.ok(html.includes('idxm-pill dn') && html.includes('idxm-pill up'));
+  assert.ok(html.includes('▼ -4.55 · -0.10%'));
+  assert.ok(html.includes('▲ +0.50%') && !html.includes('▲ +132'), '无额只显示涨幅');
+  const noAmt = indexMonitorCardHtml([{ ...items[0], amtText: null }], { status });
+  assert.ok(noAmt.includes('▼ -0.10%') && !noAmt.includes('· -0.10%'), '额缺失时只显示涨幅');
 });
 
 test('摘要胶囊：每个指数一枚，带涨跌箭头与颜色', () => {
