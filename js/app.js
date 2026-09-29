@@ -2293,6 +2293,45 @@ const app = createApp({
       return Number.isFinite(v) ? (Math.round(v * 100) / 100).toLocaleString('zh-CN') : '—';
     });
 
+    // ---- 录入/导入输入联动：名称↔代码自动互补（fund-search 保守消歧，与 OCR 补码同款能力）----
+    const fundLink = { seq: 0, timer: null, lastQueried: '' };
+    /** 防抖 400ms 触发联动；编辑模式身份字段只读，无需联动 */
+    function scheduleFundLink(source) {
+      if (snapshotEditing.value) return;
+      clearTimeout(fundLink.timer);
+      fundLink.timer = setTimeout(() => runFundLink(source), 400);
+    }
+    /**
+     * 拿另一字段的当前值查 /api/fund-search，用 pickFundCode 保守消歧后回填空着的另一字段。
+     * 只填空字段、绝不覆盖已输入内容；候选无把握（无精确/多义）留空手填；离线静默跳过。
+     * @param {'name'|'code'} source 触发源字段（互补另一侧）
+     */
+    async function runFundLink(source) {
+      fundLink.seq += 1;
+      const seq = fundLink.seq;
+      const query = String(source === 'name' ? snapshotForm.name : snapshotForm.code).trim();
+      if (!query || query === fundLink.lastQueried) return;
+      fundLink.lastQueried = query;
+      let results = [];
+      try {
+        const res = await fetch(`/api/fund-search?key=${encodeURIComponent(query)}`, {
+          headers: apiHeaders(),
+        });
+        if (res.ok) results = (await res.json()).results ?? [];
+      } catch {
+        return; // 离线/接口失败：静默，不打断录入
+      }
+      if (seq !== fundLink.seq) return; // 迟到响应丢弃（用户又输入了）
+      if (source === 'name') {
+        const code = pickFundCode(query, results);
+        if (code && !snapshotForm.code.trim()) snapshotForm.code = code;
+        return;
+      }
+      // 按代码查：fund-search 对 6 位代码返回精确候选，取官方名回填空名称
+      const exact = results.find((r) => String(r.code) === query);
+      if (exact?.name && !snapshotForm.name.trim()) snapshotForm.name = exact.name;
+    }
+
     /** 编辑已有基金的持仓快照（本金修正入口） */
     function openSnapshotEdit(f) {
       const fund = data.assets.find((a) => a.id === f.id);
@@ -3232,6 +3271,7 @@ const app = createApp({
       snapshotEditing,
       snapshotCostMismatch,
       snapshotAutoInvested,
+      scheduleFundLink,
       openSnapshotEdit,
       maskText,
       summaryHidden,
@@ -3739,12 +3779,12 @@ ${STRATEGY_CFG_MODAL}
           <div class="form-grid">
             <div class="form-field">
               <label>基金名称</label>
-              <input type="text" v-model="snapshotForm.name" placeholder="沪深300指数" :disabled="!!snapshotEditing">
+              <input type="text" v-model="snapshotForm.name" placeholder="沪深300指数" :disabled="!!snapshotEditing" @input="scheduleFundLink('name')">
               <div v-if="snapshotEditing" class="field-hint">编辑模式锁定（改名/改码=换基金，请删除后重录）</div>
             </div>
             <div class="form-field">
               <label>基金代码</label>
-              <input type="text" v-model="snapshotForm.code" placeholder="110020" :disabled="!!snapshotEditing">
+              <input type="text" v-model="snapshotForm.code" placeholder="110020" :disabled="!!snapshotEditing" @input="scheduleFundLink('code')">
             </div>
             <div class="form-field">
               <label>持有金额（元）</label>
