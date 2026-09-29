@@ -2221,12 +2221,19 @@ const app = createApp({
       const shares = parseFloat(tradeForm.shares);
       const tx = { type: tradeForm.type, date: tradeForm.date };
       if (tradeForm.type === 'buy') {
-        if (!Number.isFinite(amount) || !Number.isFinite(shares)) {
-          alert('请填写买入金额和买入份额');
+        if (!Number.isFinite(amount)) {
+          alert('请填写买入金额');
           return;
         }
         tx.amount = amount;
-        tx.shares = shares;
+        // 份额选填：当日买入净值未公布时算不出份额（金额÷净值），可先记金额，
+        // 交易列表会标「份额待补」——净值公布后点「编辑」补上即自动重算成本价
+        if (Number.isFinite(shares) && shares > 0) {
+          tx.shares = shares;
+        } else if (Number.isFinite(shares)) {
+          alert('份额无效（须为正数）——留空即按「份额待补」处理');
+          return;
+        }
       } else if (tradeForm.type === 'sell') {
         if (!Number.isFinite(shares)) {
           alert('请填写卖出份额');
@@ -2249,6 +2256,24 @@ const app = createApp({
           tx.amount = amount;
         }
       }
+      // 买入隐含净值合理性校验（防乱写份额）：隐含净值 = 金额÷份额，与最新确认净值偏差
+      // 超过 15% 给确认机会——当日按昨日净值估算本就有小幅偏差，超阈值通常是份额填错；
+      // 确认则尊重用户（他可能按自己预估算），取消返回修改；离线/无净值数据跳过（校验降级）
+      if (tx.type === 'buy' && tx.shares != null) {
+        const refNav = Number(quotesMap.value[fund.code]?.nav);
+        if (Number.isFinite(refNav) && refNav > 0) {
+          const implied = tx.amount / tx.shares;
+          const dev = Math.abs(implied - refNav) / refNav;
+          if (dev > 0.15) {
+            const ok = confirm(
+              `份额与金额可能对不上：\n按「${tx.amount} 元 ÷ ${tx.shares} 份」反算的净值是 ${implied.toFixed(4)}，` +
+                `与最新确认净值 ${refNav.toFixed(4)} 偏差 ${(dev * 100).toFixed(1)}%。\n` +
+                `（当日买入按昨日净值估算属正常小偏差，超过 15% 通常是份额填错）\n仍要保存吗？`,
+            );
+            if (!ok) return;
+          }
+        }
+      }
       if (txEdit.value) {
         // 编辑模式：替换原记录（非追加）
         fund.transactions.splice(txEdit.value.idx, 1, tx);
@@ -2266,6 +2291,12 @@ const app = createApp({
       persist();
       showTradeForm.value = false;
       resetTradeForm(); // 保存后同样收敛到干净态（与打开入口共用同一重置）
+      // 当日买入无份额（净值未公布）：提示补份额路径（交易列表 → 编辑）
+      if (tx.type === 'buy' && tx.shares == null) {
+        antd.message.success(
+          '买入已记录——份额待确认（净值公布后，在「记录」里点该笔「编辑」补上即可）',
+        );
+      }
     }
 
     const showSnapshotForm = ref(false);
@@ -3658,7 +3689,11 @@ const app = createApp({
                   {{ record.tx.amount != null ? maskText(formatMoney(record.tx.amount), summaryHidden) : '—' }}
                 </template>
                 <template v-else-if="column.key === 'shares'">
-                  {{ record.tx.shares != null ? record.tx.shares : '—' }}
+                  <template v-if="record.tx.shares != null">{{ record.tx.shares }}</template>
+                  <template v-else-if="record.tx.type === 'buy' && record.tx.amount != null">
+                    <span class="tag-est" title="当日买入净值未公布，份额待确认——净值公布后点「编辑」补上">份额待补</span>
+                  </template>
+                  <template v-else>—</template>
                 </template>
                 <template v-else-if="column.key === 'actions'">
                   <button class="btn-mini" @click="editTx(record)">编辑</button>

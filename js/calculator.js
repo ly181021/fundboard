@@ -1,10 +1,13 @@
 /**
  * 对当前状态应用一笔买入交易。
  * 买入：累计投入本金 += amount；持有份额 += shares；成本价重算。
+ * 份额缺失（当日买入净值未公布，shares 待补）视为 0：本金照记（钱已付出），
+ * 成本价暂虚高，补份额后由 computeState 重算自动修正。
  */
 export function applyBuy(state, tx) {
   const totalInvested = state.totalInvested + tx.amount;
-  const holdShares = state.holdShares + tx.shares;
+  const addShares = Number.isFinite(Number(tx.shares)) ? Number(tx.shares) : 0;
+  const holdShares = state.holdShares + addShares;
   const costPrice = holdShares > 0 ? totalInvested / holdShares : 0;
   return { ...state, totalInvested, holdShares, costPrice };
 }
