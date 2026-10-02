@@ -1160,7 +1160,17 @@ const app = createApp({
     // 行情轮询时段：交易日 9:30 起（盘中估值随行情更新 + 晚间确认净值发布），节假日按 A 股交易日历跳过
     const tradingCalendar = createTradingCalendar();
     const tradingDayCache = { date: null, ok: true }; // 未知日期按工作日粗判（乐观，下一轮校正）
+    const arrivalHolidays = ref(null); // QDII 到账判定的节假日集合；null=未加载（判定退化为只跳周末）
+    let arrivalHolidaysPromise = null;
+    function ensureArrivalHolidays() {
+      if (arrivalHolidaysPromise) return arrivalHolidaysPromise;
+      const y = new Date().getFullYear();
+      // 今去年三年并集：覆盖元旦/跨年两端的净值日与到账日（日历按年缓存，重复调用零请求）
+      arrivalHolidaysPromise = tradingCalendar.holidaysOfYears([y - 1, y, y + 1]);
+      return arrivalHolidaysPromise;
+    }
     async function refreshTradingDay() {
+      arrivalHolidays.value = await ensureArrivalHolidays();
       const d = todayStr();
       if (tradingDayCache.date === d) return;
       tradingDayCache.date = d;
@@ -1185,7 +1195,7 @@ const app = createApp({
           const state = computeState(a.snapshot, a.transactions);
           const quote = quotesMap.value[a.code];
           const merged = quote
-            ? applyQuote(state, quote, todayStr(), a.name)
+            ? applyQuote(state, quote, todayStr(), a.name, arrivalHolidays.value)
             : {
                 ...state,
                 latestNav: null,
@@ -2758,9 +2768,9 @@ const app = createApp({
     /**
      * 逐基金到账入账（与服务端 lib/snapshot.js 同口径，共用 analysis.js 的 bookArrivals）：
      * 确认净值模式下，基金净值日期比日志里最新一条更新 → 按标准到账日记一条
-     * （口径 A：国内=净值日、QDII=下一工作日，收益明细只落在交易日）；估值模式不参与。
+     * （到账日映射：国内=净值日、QDII=净值日后首个交易日（节假日感知），收益明细只落在交易日）；估值模式不参与。
      */
-    function bookDailyArrivals() {
+    async function bookDailyArrivals() {
       const entries = [];
       for (const f of fundStates.value) {
         if (f.state.mode === 'estimate') continue; // 估值不入账，只记确认净值
@@ -2776,7 +2786,7 @@ const app = createApp({
         });
       }
       if (entries.length === 0) return;
-      const { list, changed } = bookArrivals(data.daily, entries);
+      const { list, changed } = bookArrivals(data.daily, entries, await ensureArrivalHolidays());
       if (!changed) return; // 净值日期均未推进，不触发持久化
       data.daily = list;
       persist();

@@ -51,3 +51,14 @@ test('isTradingDay：节假日字段缺失按工作日粗判；格式非法返�
   assert.equal(await cal.isTradingDay('2026/09/03'), null);
   assert.equal(await cal.isTradingDay(''), null);
 });
+
+test('holidaysOfYears：多年节假日并集（跨年推进用），按年缓存，失败年份贡献空集', async () => {
+  const calls = [];
+  const cal = createTradingCalendar({ fetchFn: fakeFetch(calls) });
+  const set = await cal.holidaysOfYears([2025, 2026]);
+  assert.equal(set.has('2026-01-01'), true); // 元旦
+  assert.equal(set.has('2026-10-01'), true); // 国庆
+  assert.equal(set.size, 2); // 2025 拉取失败（404）→ 空集并入不抛错
+  await cal.holidaysOfYears([2026]); // 同年重复调用走缓存
+  assert.equal(calls.filter((u) => u.includes('2025.json') || u.includes('2026.json')).length, 2);
+});

@@ -118,6 +118,7 @@ async function makeTask({
   quotes = { 110020: QA, 161017: QB },
   today = new Date(2026, 7, 31, 16, 0),
   isTradingDay = async () => true,
+  fetchHolidays = async () => new Set(),
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'fund-arr-'));
   const db = createDatabase({ dataDir: dir });
@@ -136,10 +137,37 @@ async function makeTask({
     fetchQuotes,
     now: () => today,
     isTradingDay,
+    fetchHolidays,
     log: (m) => logs.push(m),
   });
   return { db, logs, calls, task, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
+
+test('runOnce：QDII 到账日节假日感知（fetchHolidays 注入）——节前净值记节后首个交易日', async () => {
+  const qdiiA = { ...A, name: '演示全球精选(QDII)C' };
+  const holidays = new Set([
+    '2026-10-01',
+    '2026-10-02',
+    '2026-10-03',
+    '2026-10-04',
+    '2026-10-05',
+    '2026-10-06',
+    '2026-10-07',
+  ]);
+  const h = await makeTask({
+    assets: [qdiiA],
+    quotes: { 110020: { ...QA, nav_date: '2026-09-30' } },
+    fetchHolidays: async () => holidays,
+  });
+  try {
+    await h.task.runOnce();
+    const { data } = await h.db.load();
+    assert.equal(data.daily.length, 1);
+    assert.equal(data.daily[0].date, '2026-10-08'); // 假期不算工作日，到账日记节后首个交易日
+  } finally {
+    await h.cleanup();
+  }
+});
 
 test('runOnce：行情齐全时按当天到账日入账', async () => {
   const h = await makeTask();

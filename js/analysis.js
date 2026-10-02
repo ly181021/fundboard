@@ -253,16 +253,18 @@ export function profitLevel(v) {
  * @property {number} assets - 入账时刻基金市值（份额×确认净值），供资产曲线前向填充。
  */
 /**
- * 到账入账逻辑：基金净值日更新时生成单条记录（口径A，与 tools/migrate-daily-arrival.mjs 存量重建同源）。
- * 国内基金：到账日 = 净值日（晚间披露净值）；
- * QDII（entries 含 qdii:true，基金名称识别）：到账日 = navDate 的下一个工作日 nextWorkdayOf。
- * 与 js/calculator.js applyQuote「当日/昨日列」复用实现，防止前后端口径漂移。
+ * 到账入账逻辑：基金净值日更新时生成单条记录，与 tools/migrate‑daily‑arrival.mjs 存量重建同源。
+ * 国内基金：到账日等于净值日，净值于晚间披露；
+ * QDII，entries携带qdii:true，通过基金名称辅助识别：到账日取navDate之后第一个A股交易日。
+ * 使用nextWorkdayOf计算，节假日集合由调用方通过js/tradingCalendar.js注入，缺失输入则仅跳过周末做降级处理。
+ * 与js/calculator.js applyQuote的当日、昨日列复用同一套实现，避免前后端口径漂移。
  *
- * 收益仅归属交易日；周末/节假日补拉，不会把上个交易日净值记在补拉当日。
- * entries: [{code, navDate, earnings, invested, assets, qdii}]（估值模式不传入）。
- * 幂等：相同 code+navDate 存在则跳过新增；返回 { list, changed }。
+ * 收益仅归属对应交易日。周末、节假日执行补拉，不会将上一交易日净值记录至补拉当日。
+ * entries：[{code, navDate, earnings, invested, assets, qdii}]，估值模式下不传入该字段集合。
+ * 幂等逻辑：code加navDate已存在则跳过新增；返回 { list, changed }。
  */
-export function bookArrivals(daily, entries) {
+
+export function bookArrivals(daily, entries, holidays) {
   const list = Array.isArray(daily) ? [...daily] : [];
   let changed = false;
   for (const e of entries || []) {
@@ -275,7 +277,7 @@ export function bookArrivals(daily, entries) {
     if (lastNav != null && !(e.navDate > lastNav)) continue; // 净值日期未推进 → 不重复入账
     list.push({
       code: e.code,
-      date: e.qdii ? nextWorkdayOf(e.navDate) : e.navDate,
+      date: e.qdii ? nextWorkdayOf(e.navDate, holidays) : e.navDate,
       navDate: e.navDate,
       earnings: round2(e.earnings ?? 0),
       invested: round2(e.invested ?? 0),

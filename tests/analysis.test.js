@@ -488,6 +488,23 @@ test('bookArrivals：标准到账日（口径 A）——国内=净值日、QDII=
   assert.equal(multi.list.length, 2); // B 入账（1+1 条），C 跳过
 });
 
+test('bookArrivals：节假日感知（holidays 注入）——QDII 节前净值记节后首个交易日', () => {
+  const holidays = new Set([
+    '2026-10-01',
+    '2026-10-02',
+    '2026-10-03',
+    '2026-10-04',
+    '2026-10-05',
+    '2026-10-06',
+    '2026-10-07',
+  ]);
+  const entry = [
+    { code: 'Q9', navDate: '2026-09-30', earnings: 3, invested: 70, assets: 73, qdii: true },
+  ];
+  assert.equal(bookArrivals([], entry, holidays).list[0].date, '2026-10-08'); // 国庆：错记 10-01 的口径已修
+  assert.equal(bookArrivals([], entry).list[0].date, '2026-10-01'); // 缺省（未注入/降级）：维持只跳周末
+});
+
 test('到账口径 A 两端一致：QDII 入账行（date/navDate/earnings）↔ 「当日」列取值', () => {
   // 2026-09-11 是周五、09-14 是周一：QDII 周五净值的到账日 = 周一（跨周末差 3 个日历日）
   const shares = 100;
