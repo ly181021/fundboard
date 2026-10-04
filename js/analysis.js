@@ -422,6 +422,223 @@ export function buildPrincipalCorrection({
   const nextInvested = computeState(nextSnapshot, transactions).totalInvested;
   return principalCorrection({ code, prevInvested, nextInvested, date, at });
 }
+/**
+ * 重加已有到账日志的基金时生成本金修正留痕，口径Ⅰ，由submitSnapshot新增分支调用。
+ *
+ * 末行取值：按（到账日，净值日）双键升序取末行。同日多行为节假日合并到账的真实形态，
+ * QDII多个连续净值日的到账日会落在同一个首个A股交易日，取净值日更新的行作为最新本金快照。
+ * 仅按到账日排序会依赖数组插入顺序，双键排序消除该隐式依赖。
+ *
+ * 幂等闸：corrections已存在相同code、生效日、前后本金的记录，比对忽略at时间戳，则返回null。
+ * 服务端并集去重基于完整记录比对，时间戳不同不会触发去重。corrections集合只增不减，重复记录会形成永久噪声。
+ *
+ * 记录生成复用principalCorrection。round2舍入后本金相等，用于规避同本金重加产生虚假记录；入参非法时直接透传null。
+ * 本函数为纯函数，无副作用，承诺不抛出异常。date与at由调用方注入，函数内部不读取系统时间。
+ *
+ * @param {Array} daily 到账日志 [{code, date, navDate, invested}]
+ * @param {Array} corrections 既有修正留痕记录
+ * @param {string} code 基金代码
+ * @param {number} nextInvested 重加快照的生效本金，新增基金无交易增量，取自快照total_invested
+ * @param {string} date 修正生效日，为重加操作当日
+ * @param {string|null} at 审计时间戳
+ * @returns {Object|null} 留痕记录；无日志、同本金重加、重复提交、入参非法场景均返回null
+ */
+export function reAddCorrection(daily, corrections, code, nextInvested, date, at = null) {
+  const rows = (Array.isArray(daily) ? daily : []).filter(
+    (r) => r && r.code === code && r.date && r.invested != null,
+  );
+  if (rows.length === 0) return null;
+  const last = rows
+    .sort(
+      (a, b) =>
+        String(a.date).localeCompare(String(b.date)) ||
+        String(a.navDate ?? '').localeCompare(String(b.navDate ?? '')),
+    )
+    .pop();
+  const from = round2(last.invested);
+  const to = round2(nextInvested);
+  const isDup = (Array.isArray(corrections) ? corrections : []).some(
+    (c) =>
+      c &&
+      c.code === code &&
+      String(c.date) === String(date) &&
+      round2(c.from) === from &&
+      round2(c.to) === to,
+  );
+  if (isDup) return null;
+  return principalCorrection({ code, prevInvested: last.invested, nextInvested, date, at });
+}
+
+/**
+ * 删除一笔交易将失去解释的历史跳变（删除自动留痕用）。
+ * 删除前后各跑一次 auditPrincipalJumps，对比该代码"未留痕"集合的增量：
+ * 删除前后都未留痕的跳变非本次删除造成，不返回。
+ * 纯函数无副作用，承诺不抛出异常；入参不可变。
+ */
+export function jumpsLostByTxRemoval(daily, corrections, assets, code, txIndex) {
+  const fund = (Array.isArray(assets) ? assets : []).find((a) => a && a.code === code);
+  if (!fund || !Array.isArray(fund.transactions)) return [];
+  if (txIndex == null || txIndex < 0 || txIndex >= fund.transactions.length) return [];
+  const key = (j) => `${j.date}|${round2(j.from)}|${round2(j.to)}`;
+  const beforeKeys = new Set(
+    auditPrincipalJumps(daily, corrections, assets)
+      .unexplained.filter((j) => j.code === code)
+      .map(key),
+  );
+  const reduced = (Array.isArray(assets) ? assets : []).map((a) =>
+    a && a.code === code
+      ? { ...a, transactions: a.transactions.filter((_, i) => i !== txIndex) }
+      : a,
+  );
+  return auditPrincipalJumps(daily, corrections, reduced)
+    .unexplained.filter((j) => j.code === code && !beforeKeys.has(key(j)))
+    .map(({ date, from, to }) => ({ date, from, to }));
+}
+
+/**
+ * 删除一笔交易的自动留痕（口径Ⅰ；deleteTx 落库前调用）：
+ * ① 失解释的历史跳变 → 记 {date: 跳变日, from, to}，即时认领标注；
+ * ② 本金回落/抬升 → 删除改变生效本金且与日志末行不等时记 {date: 当日, from: 末行, to: 删除后生效本金}
+ *    （待体现形态，下次入账写入新本金时认领；删现金分红等本金不变场景不记）。
+ * 幂等：同 code+生效日+前后本金已存在即跳过（与补录工具、reAddCorrection 同口径）。
+ * 纯函数无副作用，承诺不抛出异常；date/at 由调用方注入。
+ * @returns {Array} 待追加的修正记录，可能为空数组
+ */
+export function correctionsForTxRemoval(
+  daily,
+  corrections,
+  assets,
+  code,
+  txIndex,
+  date,
+  at = null,
+) {
+  const known = Array.isArray(corrections) ? corrections : [];
+  const fund = (Array.isArray(assets) ? assets : []).find((a) => a && a.code === code);
+  if (!fund || !Array.isArray(fund.transactions)) return [];
+  if (txIndex == null || txIndex < 0 || txIndex >= fund.transactions.length) return [];
+  const recs = jumpsLostByTxRemoval(daily, known, assets, code, txIndex).map((j) => ({
+    code,
+    field: 'total_invested',
+    date: String(j.date),
+    from: round2(j.from),
+    to: round2(j.to),
+    at,
+  }));
+  const rows = (Array.isArray(daily) ? daily : []).filter(
+    (r) => r && r.code === code && r.date && r.invested != null,
+  );
+  const tail =
+    rows.length > 0
+      ? rows
+          .slice()
+          .sort(
+            (a, b) =>
+              String(a.date).localeCompare(String(b.date)) ||
+              String(a.navDate ?? '').localeCompare(String(b.navDate ?? '')),
+          )
+          .pop()
+      : null;
+  const remaining = fund.transactions.filter((_, i) => i !== txIndex);
+  const effectiveAfter = round2(computeState(fund.snapshot, remaining).totalInvested);
+  if (tail && round2(tail.invested) !== effectiveAfter) {
+    recs.push({
+      code,
+      field: 'total_invested',
+      date: String(date ?? ''),
+      from: round2(tail.invested),
+      to: effectiveAfter,
+      at,
+    });
+  }
+  return recs.filter(
+    (r) =>
+      !known.some(
+        (c) =>
+          c &&
+          c.code === r.code &&
+          String(c.date) === r.date &&
+          round2(c.from) === r.from &&
+          round2(c.to) === r.to,
+      ),
+  );
+}
+
+/**
+ * 删除基金的封账留痕（口径Ⅰ；deleteFund 落库前调用）：
+ * 该基金全部非"修正留痕"状态的跳变逐跳补修正记录——交易解释的将随交易一并删除而失解释，
+ * 未留痕的本来就缺解释；已认领的跳过。删除后不再产生新入账行，无未来回落形态。
+ * 纯函数无副作用，承诺不抛出异常；date/at 由调用方注入。
+ * @returns {Array} 待追加的修正记录，可能为空数组
+ */
+export function correctionsForFundRemoval(daily, corrections, assets, code, date, at = null) {
+  const known = Array.isArray(corrections) ? corrections : [];
+  const recs = auditPrincipalJumps(daily, known, assets)
+    .jumps.filter((j) => j.code === code && j.status !== '修正留痕')
+    .map((j) => ({
+      code,
+      field: 'total_invested',
+      date: String(j.date),
+      from: round2(j.from),
+      to: round2(j.to),
+      at,
+    }));
+  return recs.filter(
+    (r) =>
+      !known.some(
+        (c) =>
+          c &&
+          c.code === r.code &&
+          String(c.date) === r.date &&
+          round2(c.from) === r.from &&
+          round2(c.to) === r.to,
+      ),
+  );
+}
+
+/**
+ * 悬空待体现修正的重锚（口径Ⅰ；submitTrade 落库前调用）：
+ * 待体现修正的 to 与当前生效本金不等时永远无法被日志认领（悬空），"待体现"橙标将永久驻留
+ * （典型：删除交易后按修正后的金额重录）。此时追加一条 to = 当前生效本金的锚记录，
+ * 下次入账认领后按"被覆盖"规则使悬空记录退出。无悬空记录返回 null（常规录交易零动作）。
+ * 纯函数无副作用，承诺不抛出异常；date/at 由调用方注入。
+ */
+export function pendingAnchorCorrection(
+  daily,
+  corrections,
+  code,
+  currentEffective,
+  date,
+  at = null,
+) {
+  const known = Array.isArray(corrections) ? corrections : [];
+  const doomed = pendingCorrections(daily, known).filter(
+    (p) => p.code === code && round2(p.to) !== round2(currentEffective),
+  );
+  if (doomed.length === 0) return null;
+  const rows = (Array.isArray(daily) ? daily : []).filter(
+    (r) => r && r.code === code && r.date && r.invested != null,
+  );
+  const tail =
+    rows.length > 0
+      ? rows
+          .slice()
+          .sort(
+            (a, b) =>
+              String(a.date).localeCompare(String(b.date)) ||
+              String(a.navDate ?? '').localeCompare(String(b.navDate ?? '')),
+          )
+          .pop()
+      : null;
+  return {
+    code,
+    field: 'total_invested',
+    date: String(date ?? ''),
+    from: tail ? round2(tail.invested) : null,
+    to: round2(currentEffective),
+    at,
+  };
+}
 
 /**
  * 本金修正对齐（口径Ⅰ：历史到账日志不可变，修正只留痕）。

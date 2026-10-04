@@ -274,6 +274,10 @@ body {
   background: var(--color-primary-hover, var(--color-primary));
   border-color: var(--color-primary-hover, var(--color-primary));
 } /* 兜底回落主色本身，绝不出现异色 */
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+} /* 提交中禁用（快照保存防连击），视觉降亮度示意不可点 */
 /* 基金主表（a-table 包装层）：保留卡片外观，antd 内部表格透明融入 */
 .fund-table {
   font-variant-numeric: tabular-nums;

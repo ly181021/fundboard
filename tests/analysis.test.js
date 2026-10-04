@@ -27,6 +27,11 @@ import {
   pendingCorrections,
   auditPrincipalJumps,
   buildPrincipalCorrection,
+  reAddCorrection,
+  jumpsLostByTxRemoval,
+  correctionsForTxRemoval,
+  correctionsForFundRemoval,
+  pendingAnchorCorrection,
 } from '../js/analysis.js';
 import { computeState, applyQuote } from '../js/calculator.js';
 
@@ -1088,6 +1093,162 @@ test('buildPrincipalCorrection：有交易的基金必须按"生效本金"留痕
   assert.deepEqual(resolveCorrections(daily, [baselineRec]), {});
   assert.equal(pendingCorrections(daily, [baselineRec]).length, 1);
   assert.equal(auditPrincipalJumps(daily, [baselineRec], assets).unexplained.length, 1);
+});
+
+// ---- 口径 Ⅰ：重加已有日志代码的自动留痕（reAddCorrection）----
+
+test('reAddCorrection：无日志 / 入参非法 / 同本金重加（两位小数相等）均返回空', () => {
+  assert.equal(reAddCorrection(null, null, 'D1', 100, '2026-10-04', 'at1'), null);
+  const daily = [{ code: 'D1', date: '2026-09-28', navDate: '2026-09-26', invested: 10500 }];
+  assert.equal(reAddCorrection(daily, [], 'D1', 10500, '2026-10-04', 'at1'), null);
+  assert.equal(reAddCorrection(daily, [], 'D1', 10500.001, '2026-10-04', 'at1'), null); // round2 相等
+  assert.equal(reAddCorrection(daily, [], 'D1', '非数值', '2026-10-04', 'at1'), null);
+});
+
+test('reAddCorrection：不同本金重加生成记录，字段取日志末行与传入值；乱序日志按日期取末行', () => {
+  const daily = [
+    { code: 'D1', date: '2026-09-29', navDate: '2026-09-26', invested: 300 },
+    { code: 'D1', date: '2026-08-28', navDate: '2026-08-28', invested: 10000 },
+    { code: 'D1', date: '2026-08-31', navDate: '2026-08-29', invested: 10500 },
+  ];
+  assert.deepEqual(reAddCorrection(daily, [], 'D1', 50, '2026-10-04', 'at1'), {
+    code: 'D1',
+    field: 'total_invested',
+    date: '2026-10-04',
+    from: 300,
+    to: 50,
+    at: 'at1',
+  });
+});
+
+test('reAddCorrection：同日多行按净值日双键取最新；幂等闸拦同 code+生效日+前后本金（忽略时间戳）', () => {
+  // 同日多行 = 节假日合并到账（连续多个净值日的到账日落在同一首个 A 股交易日）
+  const daily = [
+    { code: 'D2', date: '2026-09-28', navDate: '2026-09-25', invested: 8000 },
+    { code: 'D2', date: '2026-09-28', navDate: '2026-09-26', invested: 8500 }, // 净值日较新 → 末行
+  ];
+  assert.equal(reAddCorrection(daily, [], 'D2', 100, '2026-10-04', 'at1').from, 8500);
+
+  const corrections = [
+    { code: 'D2', field: 'total_invested', date: '2026-10-04', from: 8500, to: 100, at: 'at0' },
+  ];
+  // 同 code + 生效日 + 前后本金已存在（at 不同）→ 拦
+  assert.equal(reAddCorrection(daily, corrections, 'D2', 100, '2026-10-04', 'at1'), null);
+  // 生效日或本金不同 → 放行
+  assert.ok(reAddCorrection(daily, corrections, 'D2', 100, '2026-10-05', 'at1'));
+  assert.ok(reAddCorrection(daily, corrections, 'D2', 200, '2026-10-04', 'at1'));
+});
+
+// ---- 口径 Ⅰ：删除自动留痕（交易/基金/重锚）----
+
+const DEL_DAILY = [
+  { code: 'X', date: '2026-09-28', navDate: '2026-09-28', invested: 142.84 },
+  { code: 'X', date: '2026-09-29', navDate: '2026-09-29', invested: 242.84 },
+  { code: 'X', date: '2026-09-30', navDate: '2026-09-30', invested: 242.84 },
+];
+const DEL_SNAPSHOT = {
+  hold_amount: 91.85,
+  pending_amount: 0,
+  cost_price: 2.8834,
+  hold_shares: 50,
+  total_invested: 142.84,
+};
+
+test('correctionsForTxRemoval：删唯一解释买入 → 失解释跳变 + 本金回落两条；幂等过滤', () => {
+  const assets = [
+    {
+      code: 'X',
+      name: '演示',
+      snapshot: DEL_SNAPSHOT,
+      transactions: [{ type: 'buy', date: '2026-09-29', amount: 100, shares: 0 }],
+    },
+  ];
+  assert.deepEqual(
+    jumpsLostByTxRemoval(DEL_DAILY, [], assets, 'X', 0).map((j) => j.date),
+    ['2026-09-29'],
+  );
+  const recs = correctionsForTxRemoval(DEL_DAILY, [], assets, 'X', 0, '2026-10-04', 'at1');
+  assert.deepEqual(recs, [
+    { code: 'X', field: 'total_invested', date: '2026-09-29', from: 142.84, to: 242.84, at: 'at1' },
+    { code: 'X', field: 'total_invested', date: '2026-10-04', from: 242.84, to: 142.84, at: 'at1' },
+  ]);
+  // 幂等：同 code+date+from+to 已存在（at 不同）→ 空数组
+  const seeded = recs.map((r) => ({ ...r, at: 'at0' }));
+  assert.deepEqual(
+    correctionsForTxRemoval(DEL_DAILY, seeded, assets, 'X', 0, '2026-10-04', 'at1'),
+    [],
+  );
+});
+
+test('correctionsForTxRemoval：窗口多笔删一笔不记历史跳变；删现金分红本金不变不记回落；无日志空数组', () => {
+  const assets = [
+    {
+      code: 'X',
+      name: '演示',
+      snapshot: { ...DEL_SNAPSHOT, total_invested: 92.84 },
+      transactions: [
+        { type: 'buy', date: '2026-09-29', amount: 100, shares: 0 },
+        { type: 'buy', date: '2026-09-29', amount: 50, shares: 0 },
+      ],
+    },
+  ];
+  assert.deepEqual(correctionsForTxRemoval(DEL_DAILY, [], assets, 'X', 0, '2026-10-04', 'at1'), [
+    { code: 'X', field: 'total_invested', date: '2026-10-04', from: 242.84, to: 142.84, at: 'at1' },
+  ]);
+  const dividendAssets = [
+    {
+      code: 'X',
+      name: '演示',
+      snapshot: { ...DEL_SNAPSHOT, total_invested: 242.84 },
+      transactions: [{ type: 'dividend', method: 'cash', date: '2026-09-29', amount: 50 }],
+    },
+  ];
+  assert.deepEqual(
+    correctionsForTxRemoval(DEL_DAILY, [], dividendAssets, 'X', 0, '2026-10-04', 'at1'),
+    [
+      {
+        code: 'X',
+        field: 'total_invested',
+        date: '2026-09-29',
+        from: 142.84,
+        to: 242.84,
+        at: 'at1',
+      },
+    ],
+  );
+  assert.deepEqual(correctionsForTxRemoval([], [], assets, 'X', 0, '2026-10-04', 'at1'), []);
+});
+
+test('correctionsForFundRemoval：封账只记非"修正留痕"跳变；无日志空数组', () => {
+  const daily = [
+    { code: 'X', date: '2026-09-01', navDate: '2026-09-01', invested: 100 },
+    { code: 'X', date: '2026-09-02', navDate: '2026-09-02', invested: 200 }, // 已有留痕认领 → 跳过
+    { code: 'X', date: '2026-09-03', navDate: '2026-09-03', invested: 300 }, // 未留痕 → 补
+  ];
+  const corrections = [
+    { code: 'X', field: 'total_invested', date: '2026-09-01', from: 100, to: 200, at: 'a0' },
+  ];
+  assert.deepEqual(correctionsForFundRemoval(daily, corrections, [], 'X', '2026-10-04', 'at1'), [
+    { code: 'X', field: 'total_invested', date: '2026-09-03', from: 200, to: 300, at: 'at1' },
+  ]);
+  assert.deepEqual(correctionsForFundRemoval([], corrections, [], 'X', '2026-10-04', 'at1'), []);
+});
+
+test('pendingAnchorCorrection：悬空待体现触发重锚；未悬空或无待体现返回空', () => {
+  const daily = [{ code: 'X', date: '2026-09-30', navDate: '2026-09-30', invested: 242.84 }];
+  const pending = [
+    { code: 'X', field: 'total_invested', date: '2026-10-04', from: 242.84, to: 142.84, at: 'a1' },
+  ];
+  assert.deepEqual(pendingAnchorCorrection(daily, pending, 'X', 642.84, '2026-10-04', 'at2'), {
+    code: 'X',
+    field: 'total_invested',
+    date: '2026-10-04',
+    from: 242.84,
+    to: 642.84,
+    at: 'at2',
+  });
+  assert.equal(pendingAnchorCorrection(daily, pending, 'X', 142.84, '2026-10-04', 'at2'), null);
+  assert.equal(pendingAnchorCorrection(daily, [], 'X', 642.84, '2026-10-04', 'at2'), null);
 });
 
 // ---- 规则报告逐条（网页为无序列表）----

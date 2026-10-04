@@ -94,6 +94,10 @@ import {
   computeHoldingProfitSeries,
   resolveCorrections,
   buildPrincipalCorrection,
+  reAddCorrection,
+  correctionsForTxRemoval,
+  correctionsForFundRemoval,
+  pendingAnchorCorrection,
   pendingCorrections,
   auditPrincipalJumps,
 } from './analysis.js';
@@ -405,10 +409,29 @@ const app = createApp({
       if (!fund) return;
       const tx = fund.transactions[item.idx];
       const ok = confirm(
-        `确定删除这笔「${txLabel(tx)} ${tx.date || ''}」记录吗？\n删除后本金与收益将按剩余记录重新计算。`,
+        `确定删除这笔「${txLabel(tx)} ${tx.date || ''}」记录吗？\n删除后本金与收益将按剩余记录重新计算，历史到账收益不受影响。`,
       );
       if (!ok) return;
+      // 自动补留痕（口径Ⅰ）：失解释的历史跳变 + 本金回落，删除即补、徽标不再出现；判定失败不阻断删除
+      let recs = [];
+      try {
+        recs = correctionsForTxRemoval(
+          data.daily,
+          data.corrections,
+          data.assets,
+          fund.code,
+          item.idx,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：删除主流程不受影响，容错属刻意设计
+      }
       fund.transactions.splice(item.idx, 1);
+      if (recs.length > 0) {
+        if (!Array.isArray(data.corrections)) data.corrections = [];
+        data.corrections.push(...recs);
+      }
       persist();
       refreshTxModal();
     }
@@ -1137,12 +1160,30 @@ const app = createApp({
     /** 删除基金：连同快照与交易记录一并移除；confirm 确认后走统一持久化 */
     function deleteFund(fund) {
       const ok = confirm(
-        `确定删除「${fund.name}（${fund.code}）」吗？\n将同时删除其快照与全部交易记录，且不可撤销。\n（删除前可先点"导出"备份）`,
+        `确定删除「${fund.name}（${fund.code}）」？\n将删除快照、全部交易记录，操作不可撤销。调整数据请用「编辑」，删除前可导出备份。`,
       );
       if (!ok) return;
+      // 自动补留痕（口径Ⅰ）：封账——非"修正留痕"跳变逐跳补记录，删除后徽标不再出现；判定失败不阻断删除
+      let recs = [];
+      try {
+        recs = correctionsForFundRemoval(
+          data.daily,
+          data.corrections,
+          data.assets,
+          fund.code,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：删除主流程不受影响，容错属刻意设计
+      }
       const idx = data.assets.findIndex((a) => a.id === fund.id);
       if (idx >= 0) {
         data.assets.splice(idx, 1);
+        if (recs.length > 0) {
+          if (!Array.isArray(data.corrections)) data.corrections = [];
+          data.corrections.push(...recs);
+        }
         persist();
       }
     }
@@ -2298,6 +2339,25 @@ const app = createApp({
         }
         fund.transactions.push(tx);
       }
+      // 悬空待体现修正的重锚（口径Ⅰ）：删除后重录会使预记回落修正失配（to ≠ 新生效本金），
+      // 锚记录下次入账认领后按"被覆盖"规则使悬空记录退出；无悬空时零动作；判定失败不阻断录入
+      let anchorRec = null;
+      try {
+        anchorRec = pendingAnchorCorrection(
+          data.daily,
+          data.corrections,
+          fund.code,
+          computeState(fund.snapshot, fund.transactions).totalInvested,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：录入主流程不受影响，容错属刻意设计
+      }
+      if (anchorRec) {
+        if (!Array.isArray(data.corrections)) data.corrections = [];
+        data.corrections.push(anchorRec);
+      }
       persist();
       showTradeForm.value = false;
       resetTradeForm(); // 保存后同样收敛到干净态（与打开入口共用同一重置）
@@ -2320,6 +2380,7 @@ const app = createApp({
       totalInvested: '',
     });
     const snapshotEditing = ref(null); // 编辑模式：被编辑基金 id（null = 初次导入）
+    const snapshotSubmitting = ref(false); // 提交中标志：异步身份校验等待期禁用保存，防连击重复建仓
     const snapshotCostMismatch = computed(() => {
       // 摊薄成本（成本价×份额）≠ 累计投入本金 → 通常有卖出/现金分红；非阻断黄条，仅提醒
       if (!snapshotEditing.value) return false;
@@ -2394,6 +2455,8 @@ const app = createApp({
     }
 
     function submitSnapshot() {
+      if (snapshotSubmitting.value) return; // 身份校验异步等待期连击会重复建仓，同标志未复位直接忽略
+      snapshotSubmitting.value = true;
       const holdAmount = parseFloat(snapshotForm.holdAmount);
       const costPrice = parseFloat(snapshotForm.costPrice);
       const holdShares = parseFloat(snapshotForm.holdShares);
@@ -2405,16 +2468,22 @@ const app = createApp({
       if (!Number.isFinite(holdShares)) missing.push('持有份额');
       if (!Number.isFinite(totalInvested)) missing.push('累计投入本金');
       if (missing.length > 0) {
+        snapshotSubmitting.value = false;
         alert('请填写：' + missing.join('、'));
         return;
       }
-      validateFundIdentity().then((problem) => {
-        if (problem) {
-          alert(problem);
-          return;
-        }
-        doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested });
-      });
+      validateFundIdentity()
+        .then((problem) => {
+          if (problem) {
+            alert(problem);
+            return;
+          }
+          doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested });
+        })
+        .finally(() => {
+          // 校验拦截、落库完成或链路异常均复位按钮，防保存被永久禁用
+          snapshotSubmitting.value = false;
+        });
     }
 
     /**
@@ -2518,10 +2587,34 @@ const app = createApp({
         },
         transactions: [],
       };
+      // 重加已有到账日志的代码时自动补修正留痕（口径Ⅰ）：末行双键取最新 + 幂等闸防冗余。
+      // 留痕是审计层，判定失败不阻断保存（跳过留痕与追加句）。
+      let reAddRec = null;
+      try {
+        reAddRec = reAddCorrection(
+          data.daily,
+          data.corrections,
+          newFund.code,
+          totalInvested,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：保存主流程不受影响，容错属刻意设计
+      }
+      if (reAddRec) {
+        if (!Array.isArray(data.corrections)) data.corrections = [];
+        data.corrections.push(reAddRec);
+      }
       data.assets.push(newFund);
       persist();
       showSnapshotForm.value = false;
       resetSnapshotForm(); // 重置
+      antd.message.success(
+        reAddRec
+          ? `快照已保存。检测到历史到账日志，已自动记录本金修正 ${reAddRec.from}→${reAddRec.to}，下次入账后标注`
+          : '快照已保存',
+      );
     }
 
     function exportData() {
@@ -3140,6 +3233,7 @@ const app = createApp({
       showSnapshotForm,
       snapshotForm,
       submitSnapshot,
+      snapshotSubmitting,
       exportData,
       importData,
       quoteStatus,
@@ -3879,7 +3973,7 @@ ${STRATEGY_CFG_MODAL}
           <div class="modal-footer">
             <span v-if="snapshotEditing" style="font-size:12px; color:var(--color-muted); margin-right:auto;">保存后策略引擎按新本金即时重算徽章</span>
             <button class="btn-cancel" @click="showSnapshotForm = false">取消</button>
-            <button class="btn-primary" @click="submitSnapshot">保存</button>
+            <button class="btn-primary" @click="submitSnapshot" :disabled="snapshotSubmitting">保存</button>
           </div>
         </div>
       </div>
