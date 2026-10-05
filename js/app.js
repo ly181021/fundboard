@@ -1532,10 +1532,23 @@ const app = createApp({
       const v = summary.value.portfolio?.total?.prevDayProfit;
       return v != null ? maskText(formatMoney(v), summaryHidden.value) : '—';
     });
+    // 休市日（closed）主/次标签直接带数据日。
+    // 交易日主/次标签用短式"当日/昨日"（与主表列名一致）。
+    const stripMainLabel = computed(() => {
+      if (profitState.value !== 'closed') return '当日';
+      return maxNavDate.value ? `收益（${maxNavDate.value.slice(5)}）` : '当日';
+    });
+    const stripPrevLabel = computed(() => {
+      if (profitState.value !== 'closed') return '昨日';
+      const dates = [
+        ...new Set(fundStates.value.map((f) => f.state?.navDate).filter(Boolean)),
+      ].sort((a, b) => (a < b ? 1 : -1));
+      return dates[1] ? `前一日（${String(dates[1]).slice(5)}）` : '昨日';
+    });
     const stripDateLabel = computed(() => {
-      // 日期标注：closed/prevday 展示数据所属净值日
+      // 日期标注：closed 态已并入主标签（收益（09-30）），不再重复；prevday（交易日 22:00 后）保留小字
       const st = profitState.value;
-      if (st !== 'closed' && st !== 'prevday') return '';
+      if (st !== 'prevday') return '';
       const d = maxNavDate.value;
       return d ? `净值日 ${d.slice(5)}` : '';
     });
@@ -2853,12 +2866,24 @@ const app = createApp({
         dailyProfit: summary.value.totalDailyProfit ?? 0,
         yesterdayProfit: summary.value.totalYesterdayProfit,
       };
-      // 分析口径的数据日期：估值模式为今天、确认模式为最新净值日期（QDII 等滞后品种自然靠后）
-      const dataDate =
-        states
-          .map((f) => f.state.dataDate ?? f.state.navDate)
-          .filter(Boolean)
-          .reduce((m, d) => (d > m ? d : m), null) ?? todayStr();
+      // 分析口径的数据日期：估值模式为今天、确认模式为最新净值日期（QDII 等滞后品种自然靠后）；
+      // 非交易日（周末/法定节假日，交易日历感知）钳制为只取确认净值日——估值模式的"今天"不参与，
+      // 否则假期里标题会冒充"今日行情分析"且日期挂在假期日上
+      const isClosedToday = tradingDayFlag.value === false;
+      // 候选日期为空（行情缺 nav_date 等残缺形态）时不得兜底成自然日今天——
+      // 假期里会冒充"今日行情分析"且日期挂在假期日；诚实做法是不渲染分析卡。
+      // max 初始值必须取首个候选（字符串对字符串比较）：null 起比时 '日期' > null 走数值比较
+      // 得 NaN 恒为 false，max 永远停在 null——此前 dataDate 恒为兜底"今天"正是这个根因
+      const dateCandidates = [];
+      for (const f of states) {
+        const d = isClosedToday ? f.state.navDate : (f.state.dataDate ?? f.state.navDate);
+        if (d) dateCandidates.push(String(d));
+      }
+      let dataDate = dateCandidates[0] ?? null;
+      for (const d of dateCandidates) {
+        if (d > dataDate) dataDate = d;
+      }
+      if (!dataDate) return null;
       const reportParts = {
         today: todayStr(),
         dataDate,
@@ -2891,6 +2916,8 @@ const app = createApp({
           month: 'long',
           day: 'numeric',
         }),
+        genTime: quoteFetchedAt.value ?? null, // 生成时刻（最近一次行情成功拉取，HH:mm）
+        closed: isClosedToday, // 休市中（周末/法定节假日）：标题回落"最新行情分析"，节后首个交易日恢复
         report,
         reportLines,
         reportLinesRedacted,
@@ -3097,9 +3124,10 @@ const app = createApp({
       ),
     );
 
-    /** 当日解读入库：同日覆盖（重跑解读只留最新一条）、升序、上限 90 条；只存真正的解读文本 */
+    /** 当日解读入库：按分析口径的数据日期（dataDate）同日覆盖（重跑解读只留最新一条）、升序、上限 90 条；
+     * 只存真正的解读文本。挂 dataDate 而非自然日 */
     function saveAiLog(text) {
-      const date = todayStr();
+      const date = analysis.value?.dataDate || todayStr();
       const t = typeof text === 'string' ? text.trim() : '';
       if (
         !t ||
@@ -3328,6 +3356,8 @@ const app = createApp({
       profitStateLabel,
       stripDayText,
       stripPrevText,
+      stripMainLabel,
+      stripPrevLabel,
       stripDateLabel,
       stripDayProfit,
       toggleMask: () => {
@@ -3546,12 +3576,12 @@ const app = createApp({
         <!-- 收益条：置于核心指数监控卡下方（order:3），与各卡片同一间距；👁 与收益页 M1 双入口共用；非点击跳转区块 -->
         <div class="profit-strip" style="order: 3">
           <div class="ps-main">
-            <span class="ps-label">当日收益</span>
+            <span class="ps-label">{{ stripMainLabel }}</span>
             <span class="ps-tag" :class="'ps-' + profitState">{{ profitStateLabel }}</span>
             <b class="ps-num" :style="stripDayProfit != null && !summaryHidden ? { color: profitColor(stripDayProfit) } : {}">{{ stripDayText }}</b>
           </div>
           <div class="ps-sub">
-            <span>昨日 <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
+            <span>{{ stripPrevLabel }} <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
             <span v-if="stripDateLabel" class="ps-date">{{ stripDateLabel }}</span>
             <span class="ps-flex"></span>
             <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask"><svg v-if="summaryHidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="20" x2="20" y2="4"/></svg><svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -3685,7 +3715,8 @@ const app = createApp({
         <div class="analysis-head">
           <b>{{ analysis.dataDate === analysis.today ? '今日行情分析' : '最新行情分析' }}</b>
           <span class="analysis-head-right">
-            <span class="date">{{ analysis.dataDateLabel }} · 规则生成</span>
+            <span class="date">{{ analysis.dataDateLabel }}{{ analysis.genTime ? ' ' + analysis.genTime : '' }} · 规则生成</span>
+            <span v-if="analysis.closed" class="tag-est" title="今天休市，展示最近交易日的数据；节后首个交易日恢复更新">休市中</span>
             <button class="btn-mini" :disabled="aiBusy" @click="runAiAnalysis">{{ aiBusy ? 'AI 解读生成中…' : '✨ AI 解读' }}</button>
           </span>
         </div>

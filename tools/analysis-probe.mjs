@@ -53,11 +53,12 @@ const fundStates = db.assets
 const attribution = computeAttribution(fundStates);
 const concentration = computeConcentration(fundStates);
 const indexes = await ds.fetchIndexes();
-const dataDate =
-  fundStates
-    .map((f) => f.state.dataDate ?? f.state.navDate)
-    .filter(Boolean)
-    .reduce((m, d) => (d > m ? d : m), null) ?? todayStr;
+const dateCands = fundStates
+  .map((f) => f.state.dataDate ?? f.state.navDate)
+  .filter(Boolean)
+  .map(String);
+// max 初始值取首个候选（字符串对字符串）：null 起比 '日期' > null 得 NaN 恒 false，max 恒为 null
+const dataDate = dateCands.length ? dateCands.reduce((m, d) => (d > m ? d : m)) : todayStr;
 const dailyProfit = fundStates
   .map((f) => f.state.dailyProfit)
   .filter((v) => v != null)
