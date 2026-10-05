@@ -30,6 +30,37 @@ export function saveBool(storage, key, value) {
   }
 }
 
+/** 消息已读签名键（localStorage）：存"标记已读那一刻全部消息签名"的 JSON 数组 */
+export const MSG_READ_KEY = 'ui-msg-read-sigs';
+
+/** 解析已读签名数组：非法/缺省回退空数组；非字符串项过滤 */
+export function parseMsgReadSigs(raw) {
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 读已读签名数组：存储异常回退空数组 */
+export function loadMsgReadSigs(storage) {
+  try {
+    return parseMsgReadSigs(storage.getItem(MSG_READ_KEY));
+  } catch {
+    return [];
+  }
+}
+
+/** 写已读签名数组（截尾保留最近 200 条，防无限增长）：写入失败静默（隐私模式） */
+export function saveMsgReadSigs(storage, sigs) {
+  try {
+    storage.setItem(MSG_READ_KEY, JSON.stringify(sigs.slice(-200)));
+  } catch {
+    /* 静默 */
+  }
+}
+
 /**
  * 首页区块 key（顺序即默认顺序：数据源健康条 → 核心指数）。
  * 'summary'（资产总览）已迁入收益页 M1 并退役——旧存储含 summary 时由

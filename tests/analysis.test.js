@@ -1073,6 +1073,7 @@ test('buildPrincipalCorrection：有交易的基金必须按"生效本金"留痕
     from: 10500,
     to: 10000,
     at: 'X',
+    reason: '手动修正',
   });
   assert.deepEqual(resolveCorrections(daily, [rec]), {
     '2026-09-07': [{ code: '110020', from: 10500, to: 10000 }],
@@ -1120,6 +1121,7 @@ test('reAddCorrection：不同本金重加生成记录，字段取日志末行�
     from: 300,
     to: 50,
     at: 'at1',
+    reason: '重新添加基金',
   });
 });
 
@@ -1171,8 +1173,24 @@ test('correctionsForTxRemoval：删唯一解释买入 → 失解释跳变 + 本�
   );
   const recs = correctionsForTxRemoval(DEL_DAILY, [], assets, 'X', 0, '2026-10-04', 'at1');
   assert.deepEqual(recs, [
-    { code: 'X', field: 'total_invested', date: '2026-09-29', from: 142.84, to: 242.84, at: 'at1' },
-    { code: 'X', field: 'total_invested', date: '2026-10-04', from: 242.84, to: 142.84, at: 'at1' },
+    {
+      code: 'X',
+      field: 'total_invested',
+      date: '2026-09-29',
+      from: 142.84,
+      to: 242.84,
+      at: 'at1',
+      reason: '删除交易',
+    },
+    {
+      code: 'X',
+      field: 'total_invested',
+      date: '2026-10-04',
+      from: 242.84,
+      to: 142.84,
+      at: 'at1',
+      reason: '删除交易',
+    },
   ]);
   // 幂等：同 code+date+from+to 已存在（at 不同）→ 空数组
   const seeded = recs.map((r) => ({ ...r, at: 'at0' }));
@@ -1195,7 +1213,15 @@ test('correctionsForTxRemoval：窗口多笔删一笔不记历史跳变；删现
     },
   ];
   assert.deepEqual(correctionsForTxRemoval(DEL_DAILY, [], assets, 'X', 0, '2026-10-04', 'at1'), [
-    { code: 'X', field: 'total_invested', date: '2026-10-04', from: 242.84, to: 142.84, at: 'at1' },
+    {
+      code: 'X',
+      field: 'total_invested',
+      date: '2026-10-04',
+      from: 242.84,
+      to: 142.84,
+      at: 'at1',
+      reason: '删除交易',
+    },
   ]);
   const dividendAssets = [
     {
@@ -1215,6 +1241,7 @@ test('correctionsForTxRemoval：窗口多笔删一笔不记历史跳变；删现
         from: 142.84,
         to: 242.84,
         at: 'at1',
+        reason: '删除交易',
       },
     ],
   );
@@ -1231,7 +1258,15 @@ test('correctionsForFundRemoval：封账只记非"修正留痕"跳变；无日�
     { code: 'X', field: 'total_invested', date: '2026-09-01', from: 100, to: 200, at: 'a0' },
   ];
   assert.deepEqual(correctionsForFundRemoval(daily, corrections, [], 'X', '2026-10-04', 'at1'), [
-    { code: 'X', field: 'total_invested', date: '2026-09-03', from: 200, to: 300, at: 'at1' },
+    {
+      code: 'X',
+      field: 'total_invested',
+      date: '2026-09-03',
+      from: 200,
+      to: 300,
+      at: 'at1',
+      reason: '删除基金',
+    },
   ]);
   assert.deepEqual(correctionsForFundRemoval([], corrections, [], 'X', '2026-10-04', 'at1'), []);
 });
@@ -1248,6 +1283,7 @@ test('pendingAnchorCorrection：悬空待体现触发重锚；未悬空或无待
     from: 242.84,
     to: 642.84,
     at: 'at2',
+    reason: '录入新交易',
   });
   assert.equal(pendingAnchorCorrection(daily, pending, 'X', 142.84, '2026-10-04', 'at2'), null);
   assert.equal(pendingAnchorCorrection(daily, [], 'X', 642.84, '2026-10-04', 'at2'), null);

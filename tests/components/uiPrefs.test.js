@@ -15,6 +15,10 @@ import {
   visibleOrderOf,
   moveInOrder,
   dropInOrder,
+  MSG_READ_KEY,
+  parseMsgReadSigs,
+  loadMsgReadSigs,
+  saveMsgReadSigs,
 } from '../../js/uiPrefs.js';
 
 const mockStorage = (initial = {}) => {
@@ -183,4 +187,29 @@ test('dropInOrder：切除-插入语义（A 拖到 C 后 → [B,C,A]）；同键
     dropInOrder(DEFAULT_BLOCK_ORDER, ALL_VIS, 'health', 'nope'),
     DEFAULT_BLOCK_ORDER,
   );
+});
+
+test('消息已读签名（MSG_READ_KEY）：解析过滤非字符串；读写往返；截尾防增长；异常回退空', () => {
+  const storage = mockStorage();
+  // 空存储 → 空数组
+  assert.deepEqual(loadMsgReadSigs(storage), []);
+  // 解析器直测：非法 JSON / 非数组 → 空数组；非字符串项过滤
+  assert.deepEqual(parseMsgReadSigs('{broken'), []);
+  assert.deepEqual(parseMsgReadSigs(JSON.stringify({ nope: 1 })), []);
+  assert.deepEqual(parseMsgReadSigs(JSON.stringify(['ok', 42, null])), ['ok']);
+  // 写入 → 往返一致
+  saveMsgReadSigs(storage, ['a|1|2', 'b|2|3']);
+  assert.deepEqual(loadMsgReadSigs(storage), ['a|1|2', 'b|2|3']);
+  // 非法 JSON / 非数组 / 含非字符串项 → 过滤或回退空
+  storage.setItem(MSG_READ_KEY, '{broken');
+  assert.deepEqual(loadMsgReadSigs(storage), []);
+  storage.setItem(MSG_READ_KEY, JSON.stringify({ nope: 1 }));
+  assert.deepEqual(loadMsgReadSigs(storage), []);
+  storage.setItem(MSG_READ_KEY, JSON.stringify(['ok', 42, null]));
+  assert.deepEqual(loadMsgReadSigs(storage), ['ok']);
+  // 截尾：超过 200 条只留最近 200 条
+  const many = Array.from({ length: 260 }, (_, i) => `s${i}`);
+  saveMsgReadSigs(storage, many);
+  assert.equal(loadMsgReadSigs(storage).length, 200);
+  assert.equal(loadMsgReadSigs(storage)[0], 's60');
 });

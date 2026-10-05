@@ -420,7 +420,8 @@ export function buildPrincipalCorrection({
 }) {
   const prevInvested = computeState(prevSnapshot, transactions).totalInvested;
   const nextInvested = computeState(nextSnapshot, transactions).totalInvested;
-  return principalCorrection({ code, prevInvested, nextInvested, date, at });
+  const rec = principalCorrection({ code, prevInvested, nextInvested, date, at });
+  return rec ? { ...rec, reason: '手动修正' } : rec;
 }
 /**
  * 重加已有到账日志的基金时生成本金修正留痕，口径Ⅰ，由submitSnapshot新增分支调用。
@@ -466,7 +467,8 @@ export function reAddCorrection(daily, corrections, code, nextInvested, date, at
       round2(c.to) === to,
   );
   if (isDup) return null;
-  return principalCorrection({ code, prevInvested: last.invested, nextInvested, date, at });
+  const rec = principalCorrection({ code, prevInvested: last.invested, nextInvested, date, at });
+  return rec ? { ...rec, reason: '重新添加基金' } : rec;
 }
 
 /**
@@ -524,6 +526,7 @@ export function correctionsForTxRemoval(
     from: round2(j.from),
     to: round2(j.to),
     at,
+    reason: '删除交易',
   }));
   const rows = (Array.isArray(daily) ? daily : []).filter(
     (r) => r && r.code === code && r.date && r.invested != null,
@@ -549,6 +552,7 @@ export function correctionsForTxRemoval(
       from: round2(tail.invested),
       to: effectiveAfter,
       at,
+      reason: '删除交易',
     });
   }
   return recs.filter(
@@ -582,6 +586,7 @@ export function correctionsForFundRemoval(daily, corrections, assets, code, date
       from: round2(j.from),
       to: round2(j.to),
       at,
+      reason: '删除基金',
     }));
   return recs.filter(
     (r) =>
@@ -637,6 +642,7 @@ export function pendingAnchorCorrection(
     from: tail ? round2(tail.invested) : null,
     to: round2(currentEffective),
     at,
+    reason: '录入新交易',
   };
 }
 

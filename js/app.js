@@ -67,6 +67,8 @@ import {
   maskText,
   loadBool,
   saveBool,
+  loadMsgReadSigs,
+  saveMsgReadSigs,
   loadBlockOrder,
   saveBlockOrder,
   visibleOrderOf,
@@ -2770,27 +2772,67 @@ const app = createApp({
 
     // 到账日志天数（收益日历"不足 2 天暂不绘制"的判据）
     const dailyLen = computed(() => aggregateDaily(data.daily).length);
-    // 待体现徽标：改完本金数字立刻更新，但圆标/打点要等入账把新本金写进日志才出现；
-    // 这段空窗期用一枚徽标明确"已记录、待体现"，避免"改了没反应"分不清是没记录还是没到标注日。
+    // 待体现状态来源：改完本金数字立刻更新，但圆标/打点要等入账把新本金写进日志才出现；
+    // 这段空窗期由消息中心橙标承接"已记录、待体现"，避免"改了没反应"分不清是没记录还是没到标注日。
     const corrPending = computed(() => pendingCorrections(data.daily, data.corrections));
-    const corrPendingTitle = computed(
-      () =>
-        corrPending.value
-          .map((c) => `${c.code} ${c.from ?? '—'}→${c.to ?? '—'}（修正日 ${c.date ?? '—'}）`)
-          .join('；') + '——下次入账把新本金写入到账日志后，自动在日历与资产曲线标注',
-    );
     // 本金跳变自动巡检（口径 Ⅰ）：判定与服务端每轮入账后的巡检同源（analysis.auditPrincipalJumps），
     // 检出"无交易解释且无修正留痕"的跳变时提示补录——页面开着就自动发现，不必手动跑工具。
     const principalAudit = computed(() =>
       auditPrincipalJumps(data.daily, data.corrections, data.assets),
     );
-    const jumpAuditTitle = computed(
-      () =>
-        principalAudit.value.unexplained
-          .map((j) => `${j.code} ${j.date} ${j.from}→${j.to}`)
-          .join('；') +
-        '——该本金变化既无交易解释、也无修正留痕（通常是手动改过本金但未补录）；确认后可用 node tools/backfill-corrections.mjs 补录',
+
+    // ---- 消息中心（方案 A：三类消息由账本实时派生，不落库；已读签名存 localStorage）----
+    const messages = computed(() => {
+      const nameOf = new Map(data.assets.map((a) => [a.code, a.name]));
+      const nameOfCode = (c) => nameOf.get(c) ?? c; // 基金已删除时名称不可考，回退代码
+      const list = [];
+      // 黄（需动手）：无交易解释也无修正留痕——仅存量遗留或绕过页面改数据会出现
+      for (const j of principalAudit.value.unexplained) {
+        list.push({
+          type: 'yellow',
+          sig: `y|${j.code}|${j.date}|${j.from}|${j.to}`,
+          txt: `${nameOfCode(j.code)}：${j.date} 检测到本金发生无来源记录的变动。大概率为绕过页面直接修改数据，请维护人员核查并补录相关记录。`,
+        });
+      }
+      // 橙（状态）：修正已记好、等下次入账体现
+      for (const c of corrPending.value) {
+        const why = c.reason ? `（${c.reason}）` : '';
+        list.push({
+          type: 'orange',
+          sig: `o|${c.code}|${c.date}|${c.to}|${c.at ?? ''}`,
+          txt: `${nameOfCode(c.code)}：${c.date ?? '—'} 检测到本金发生调整${why}，调整为 ${c.to ?? '—'} 元。调整已记录，待下一次入账后自动同步日历、走势图，用户无需执行操作。`,
+        });
+      }
+      // 蓝（状态）：买入金额已记、份额等确认净值公布后自动补齐
+      for (const f of data.assets) {
+        if (f.asset_type !== 'fund') continue;
+        (f.transactions || []).forEach((t, idx) => {
+          if (!t || t.type !== 'buy' || t.shares != null) return;
+          list.push({
+            type: 'blue',
+            sig: `b|${f.code}|${t.date}|${t.amount}|${idx}`,
+            txt: `${f.name}，${t.date} 发生 ${t.amount} 元买入，对应份额暂未补齐。待官方净值公布，系统将自动完成份额计算补录，用户无需执行操作。`,
+          });
+        });
+      }
+      const rank = { yellow: 0, orange: 1, blue: 2 }; // 需动手的在前，同类新者在前
+      return list.sort((a, b) => rank[a.type] - rank[b.type] || (a.sig < b.sig ? 1 : -1));
+    });
+    const msgReadSigs = ref(loadMsgReadSigs(localStorage));
+    const unreadCount = computed(
+      () => messages.value.filter((m) => !msgReadSigs.value.includes(m.sig)).length,
     );
+    const msgPanelOpen = ref(false);
+    function toggleMsgPanel() {
+      msgPanelOpen.value = !msgPanelOpen.value;
+    }
+    function markAllMsgRead() {
+      msgReadSigs.value = messages.value.map((m) => m.sig);
+      saveMsgReadSigs(localStorage, msgReadSigs.value);
+    }
+    function onGlobalKeydown(e) {
+      if (e.key === 'Escape') msgPanelOpen.value = false;
+    }
 
     const round2 = (v) => Math.round(v * 100) / 100;
 
@@ -3191,6 +3233,10 @@ const app = createApp({
     // ---- ESC 关闭最上层弹窗（输入法合成中不响应，防误关丢表单内容）----
     function onKeydown(e) {
       if (e.key !== 'Escape' || e.isComposing) return;
+      if (msgPanelOpen.value) {
+        msgPanelOpen.value = false;
+        return;
+      } // 消息面板最轻量，最先响应
       if (estimateBoardCode.value) {
         closeEstimateBoard();
         return;
@@ -3433,10 +3479,12 @@ const app = createApp({
       summaryCollapsed,
       blockOrder,
       visibleOrder,
-      corrPending,
-      corrPendingTitle,
-      principalAudit,
-      jumpAuditTitle,
+      messages,
+      unreadCount,
+      msgReadSigs,
+      msgPanelOpen,
+      toggleMsgPanel,
+      markAllMsgRead,
       onDragStart,
       onDrop,
       onMoveClick,
@@ -3461,15 +3509,38 @@ const app = createApp({
           <button class="theme-btn" @click="toggleTheme" :title="'主题（当前：' + themeLabel + '，点击切换）'"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2a6 6 0 010 12z" fill="currentColor"/></svg>{{ themeLabel }}</button>
           <button class="theme-btn" @click="cycleUpdown" :title="'涨跌色（当前：' + updownLabel + '，点击切换）'"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>{{ updownLabel }}</button>
           <button class="privacy-btn" @click.stop="toggleMask" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>{{ summaryHidden ? '显示金额' : '隐藏金额' }}</span></button>
+          <!-- 消息中心铃铛（方案 A：三类消息由账本实时派生；已读签名存 localStorage）：视图页签工具区、隐藏金额右侧 -->
+          <div class="msg-bellwrap">
+            <button
+              type="button"
+              class="msg-bell"
+              :title="unreadCount > 0 ? '消息（' + unreadCount + ' 条未读）' : '消息'"
+              @click="toggleMsgPanel"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+              <span v-if="unreadCount" class="msg-cnt">{{ unreadCount }}</span>
+            </button>
+            <div v-if="msgPanelOpen" class="msg-panel">
+              <div class="msg-panel-head">
+                <span>消息</span>
+                <span class="msg-mark" @click="markAllMsgRead">全部标为已读</span>
+              </div>
+              <div v-if="messages.length === 0" class="msg-empty">暂无消息——一切正常</div>
+              <div
+                v-for="m in messages"
+                :key="m.sig"
+                class="msg-item"
+                :class="['msg-' + m.type, { 'msg-unread': !msgReadSigs.includes(m.sig) }]"
+              >
+                <span class="msg-dot"></span>
+                <span class="msg-txt">{{ m.txt }}<span v-if="!msgReadSigs.includes(m.sig)" class="msg-new">新</span></span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- 首页收益条已移至核心指数监控卡下方（order:3；顶部固定非排序区块） -->
       <div v-if="viewMode === 'board'" class="blocks-wrap" @dragstart="onDragStart" @dragover.prevent @drop.prevent="onDrop" @click="onMoveClick">
-        <!-- 资产总览位于收益页 M1；本金徽标留在首页、置于健康条旁 -->
-        <div v-if="corrPending.length || principalAudit.unexplained.length" class="principal-badges">
-          <span v-if="corrPending.length" class="corr-pending" :title="corrPendingTitle">本金修正待体现 {{ corrPending.length }} 条</span>
-          <span v-if="principalAudit.unexplained.length" class="corr-audit" :title="jumpAuditTitle">本金跳变未留痕 {{ principalAudit.unexplained.length }} 处</span>
-        </div>
         <div v-if="healthStrip" class="health-wrap blk" data-blk="health" :style="{ order: visibleOrder.indexOf('health') + 1 }" v-html="healthStrip"></div>
         <div v-if="indexes.length" class="idxm-wrap blk" data-blk="idx" :style="{ order: visibleOrder.indexOf('idx') + 1 }" :class="{ 'is-collapsed': !indexExpanded }" role="button" tabindex="0" :aria-expanded="String(indexExpanded)" aria-label="核心指数监控，点击折叠或展开" @click="toggleIndexMonitor" @keydown.enter="onIndexHeadKey" @keydown.space="onIndexHeadKey" v-html="indexMonitorHtml"></div>
         <!-- 收益条：置于核心指数监控卡下方（order:3），与各卡片同一间距；👁 与收益页 M1 双入口共用；非点击跳转区块 -->
