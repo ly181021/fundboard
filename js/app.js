@@ -2843,6 +2843,14 @@ const app = createApp({
       msgReadSigs.value = messages.value.map((m) => m.sig);
       saveMsgReadSigs(localStorage, msgReadSigs.value);
     }
+    // 点外部关闭：事件挂在铃铛容器外即视为"外部"（铃铛与面板自身的点击不冒泡到此判定）
+    const msgBellWrapEl = ref(null);
+    function onGlobalPointerdownForMsg(e) {
+      if (!msgPanelOpen.value) return;
+      if (msgBellWrapEl.value && !msgBellWrapEl.value.contains(e.target)) {
+        msgPanelOpen.value = false;
+      }
+    }
     function onGlobalKeydown(e) {
       if (e.key === 'Escape') msgPanelOpen.value = false;
     }
@@ -3291,12 +3299,14 @@ const app = createApp({
       }
     }
     window.addEventListener('keydown', onKeydown);
+    window.addEventListener('pointerdown', onGlobalPointerdownForMsg); // 消息面板点外部关闭
     window.addEventListener('resize', onWindowResize); // 曲线宽随容器走（不用 ResizeObserver，避免弹窗卸载后回调）
     onUnmounted(() => {
       clearInterval(quoteTimer);
       clearInterval(clockTimer);
       stopCurveClock();
       window.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('pointerdown', onGlobalPointerdownForMsg);
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('hashchange', onHashChange); // 路由监听随组件卸载移除
       ocrCleanup?.();
@@ -3513,6 +3523,7 @@ const app = createApp({
       unreadCount,
       msgReadSigs,
       msgPanelOpen,
+      msgBellWrapEl,
       toggleMsgPanel,
       markAllMsgRead,
       onDragStart,
@@ -3540,7 +3551,7 @@ const app = createApp({
           <button class="theme-btn" @click="cycleUpdown" :title="'涨跌色（当前：' + updownLabel + '，点击切换）'"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>{{ updownLabel }}</button>
           <button class="privacy-btn" @click.stop="toggleMask" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>{{ summaryHidden ? '显示金额' : '隐藏金额' }}</span></button>
           <!-- 消息中心铃铛（方案 A：三类消息由账本实时派生；已读签名存 localStorage）：视图页签工具区、隐藏金额右侧 -->
-          <div class="msg-bellwrap">
+          <div class="msg-bellwrap" ref="msgBellWrapEl">
             <button
               type="button"
               class="msg-bell"
