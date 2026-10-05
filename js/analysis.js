@@ -640,6 +640,83 @@ export function pendingAnchorCorrection(
   };
 }
 
+/** 买入的确认净值日：申购日为交易日取当日，否则顺延下一交易日（holidays 集合注入）。非日期串返回 null。 */
+function confirmNavDateOf(txDate, holidaySet) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(txDate))) return null;
+  const day = parseISODate(txDate).getDay();
+  const isTrading = day !== 0 && day !== 6 && !holidaySet.has(String(txDate));
+  return isTrading ? String(txDate) : nextWorkdayOf(txDate, holidaySet);
+}
+
+/**
+ * 当日买入的份额自动补齐（份额待补全自动化的纯函数核心；入账任务与页面行情刷新共用）。
+ * 买入的确认净值日 = 买入当日（交易日）或其后的首个交易日（周末/节假日下的单顺延，与到账口径 A 同源）；
+ * 行情侧公布净值日与确认净值日一致时，按 份额 = 金额 ÷ 确认净值（round2）推算。
+ * 已有份额、卖出、分红不触碰；确认净值日未到不补（严格相等，错过公布夜的待补走历史驱动通道或手动路径）。
+ * 补齐只写份额、不改金额：本金口径不受影响，与本金跳变巡检、修正留痕体系零联动。
+ * 纯函数无副作用，承诺不抛出异常；holidays 集合注入（Set/数组均可，缺省退化只跳周末）。
+ * @param {Array} transactions 交易列表
+ * @param {string} navDate 行情侧已公布的确认净值所属日期（YYYY-MM-DD）
+ * @param {number} nav 该日确认净值
+ * @param {Set|Array} holidays 法定节假日集合
+ * @returns {Array} [{idx, shares}] 待补位置与推算份额，可能为空数组
+ */
+export function pendingShareFills(transactions, navDate, nav, holidays = []) {
+  const navNum = Number(nav);
+  if (!Array.isArray(transactions) || !navDate || !Number.isFinite(navNum) || navNum <= 0) {
+    return [];
+  }
+  const holidaySet =
+    holidays instanceof Set ? holidays : new Set(Array.isArray(holidays) ? holidays : []);
+  const fills = [];
+  transactions.forEach((t, idx) => {
+    if (!t || t.type !== 'buy' || t.shares != null) return;
+    if (!t.date || !Number.isFinite(Number(t.amount))) return;
+    const confirmDate = confirmNavDateOf(t.date, holidaySet);
+    if (!confirmDate || String(navDate) !== confirmDate) return;
+    fills.push({ idx, shares: round2(Number(t.amount) / navNum) });
+  });
+  return fills;
+}
+
+/**
+ * 份额待补的历史净值驱动补齐（服务端入账任务对存在待补的基金拉取历史净值后调用）。
+ * 取确认净值日起首个已公布净值日（series 升序中首个 date ≥ 确认日）的净值推算份额：
+ * 覆盖 QDII 公布时滞（T+1/T+2）、海外休市导致的净值跳空日、补发跳日，以及错过行情快照窗口的存量待补。
+ * 净值未公布到确认日（series 末行早于确认日）不补，等待下轮。
+ * 纯函数无副作用，承诺不抛出异常；holidays 集合注入（Set/数组均可，缺省退化只跳周末）。
+ * @param {Array} transactions 交易列表
+ * @param {Array} series 历史净值序列（升序，[{date, nav}]，fetchHistory 产物）
+ * @param {Set|Array} holidays 法定节假日集合
+ * @returns {Array} [{idx, shares}] 待补位置与推算份额，可能为空数组
+ */
+export function pendingShareFillsFromHistory(transactions, series, holidays = []) {
+  const holidaySet =
+    holidays instanceof Set ? holidays : new Set(Array.isArray(holidays) ? holidays : []);
+  const rows = (Array.isArray(series) ? series : []).filter(
+    (r) =>
+      r &&
+      /^\d{4}-\d{2}-\d{2}$/.test(String(r.date)) &&
+      Number.isFinite(Number(r.nav)) &&
+      Number(r.nav) > 0,
+  );
+  const fills = [];
+  if (!Array.isArray(transactions) || rows.length === 0) return fills;
+  transactions.forEach((t, idx) => {
+    if (!t || t.type !== 'buy' || t.shares != null) return;
+    if (!t.date || !Number.isFinite(Number(t.amount))) return;
+    const confirmDate = confirmNavDateOf(t.date, holidaySet);
+    if (!confirmDate) return;
+    // 历史净值只有最近 90 天，够不到确认日就放弃补齐：
+    // 否则下面 find 会拿到窗口里第一天的净值去算份额
+    if (String(rows[0].date) > confirmDate) return;
+    const hit = rows.find((r) => String(r.date) >= confirmDate); // 首个已公布净值日 ≥ 确认日
+    if (!hit) return; // 净值未公布到确认日 → 等待
+    fills.push({ idx, shares: round2(Number(t.amount) / Number(hit.nav)) });
+  });
+  return fills;
+}
+
 /**
  * 本金修正对齐（口径Ⅰ：历史到账日志不可变，修正只留痕）。
  * 将编辑本金产生的修正记录映射到到账日志中首次体现新本金的日期。

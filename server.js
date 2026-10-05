@@ -722,10 +722,11 @@ server.listen(PORT, HOST, () => {
   if (SNAPSHOT_TASK) {
     const log = (msg) =>
       console.log(`[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}] ${msg}`);
-    // fetchQuoteBatch 是 datasource 闭包方法，不依赖 this，可直接解耦传递
+    // fetchQuoteBatch/fetchHistory 是 datasource 闭包方法，不依赖 this，可直接解耦传递
     createSnapshotTask({
       db,
       fetchQuotes: datasource.fetchQuoteBatch,
+      fetchHistory: datasource.fetchHistory,
       intervalMs: SNAPSHOT_INTERVAL_MIN * 60 * 1000,
       log,
     }).start();

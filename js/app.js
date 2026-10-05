@@ -98,6 +98,7 @@ import {
   correctionsForTxRemoval,
   correctionsForFundRemoval,
   pendingAnchorCorrection,
+  pendingShareFills,
   pendingCorrections,
   auditPrincipalJumps,
 } from './analysis.js';
@@ -2361,11 +2362,9 @@ const app = createApp({
       persist();
       showTradeForm.value = false;
       resetTradeForm(); // 保存后同样收敛到干净态（与打开入口共用同一重置）
-      // 当日买入无份额（净值未公布）：提示补份额路径（交易列表 → 编辑）
+      // 当日买入无份额（净值未公布）：自动补齐口径说明（确认净值公布后系统补，手动编辑为修正手段）
       if (tx.type === 'buy' && tx.shares == null) {
-        antd.message.success(
-          '买入已记录——份额待确认（净值公布后，在「记录」里点该笔「编辑」补上即可）',
-        );
+        antd.message.success('买入已记录——份额待补：确认净值公布后系统自动补齐，也可手动编辑修正');
       }
     }
 
@@ -2865,6 +2864,8 @@ const app = createApp({
      */
     async function bookDailyArrivals() {
       const entries = [];
+      const arrivalHolidays = await ensureArrivalHolidays();
+      let shareFills = 0;
       for (const f of fundStates.value) {
         if (f.state.mode === 'estimate') continue; // 估值不入账，只记确认净值
         if (f.state.holdShares <= 0) continue;
@@ -2877,11 +2878,30 @@ const app = createApp({
           assets: f.state.holdShares * f.state.latestNav,
           qdii: /QDII/i.test(f.name ?? ''),
         });
+        // 份额待补自动补齐（份额=金额÷确认净值；入账后执行，与手动编辑路径口径一致）
+        try {
+          const fund = data.assets.find((a) => a.code === f.code);
+          const fills = pendingShareFills(
+            fund?.transactions,
+            f.state.navDate,
+            f.state.latestNav,
+            arrivalHolidays,
+          );
+          for (const fill of fills) {
+            fund.transactions[fill.idx].shares = fill.shares;
+            shareFills++;
+          }
+        } catch {
+          // 补齐判定可弃：入账主流程不受影响，容错属刻意设计
+        }
       }
       if (entries.length === 0) return;
-      const { list, changed } = bookArrivals(data.daily, entries, await ensureArrivalHolidays());
-      if (!changed) return; // 净值日期均未推进，不触发持久化
+      const { list, changed } = bookArrivals(data.daily, entries, arrivalHolidays);
+      if (!changed && shareFills === 0) return; // 净值日期均未推进且无补齐，不触发持久化
       data.daily = list;
+      if (shareFills > 0) {
+        antd.message.success(`已按确认净值自动补齐 ${shareFills} 笔买入份额`);
+      }
       persist();
     }
 

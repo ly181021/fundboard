@@ -119,6 +119,7 @@ async function makeTask({
   today = new Date(2026, 7, 31, 16, 0),
   isTradingDay = async () => true,
   fetchHolidays = async () => new Set(),
+  fetchHistory = null,
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'fund-arr-'));
   const db = createDatabase({ dataDir: dir });
@@ -138,10 +139,43 @@ async function makeTask({
     now: () => today,
     isTradingDay,
     fetchHolidays,
+    fetchHistory,
     log: (m) => logs.push(m),
   });
   return { db, logs, calls, task, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
+
+test('runOnce：份额待补按历史净值自动补齐（fetchHistory 注入；行情快照日已越过确认日的待补也覆盖）', async () => {
+  const pendingAsset = {
+    ...A,
+    transactions: [
+      ...A.transactions,
+      { type: 'buy', date: '2026-08-14', amount: 220 }, // 无份额：确认日 08-14（周五），行情快照已到 08-31 → 快照严格相等通道错过
+    ],
+  };
+  const h = await makeTask({
+    assets: [pendingAsset],
+    quotes: { 110020: { ...QA, nav_date: '2026-08-31' } },
+    fetchHistory: async (code) => ({
+      code,
+      series: [
+        { date: '2026-08-14', nav: 2.2 },
+        { date: '2026-08-31', nav: 1.5 },
+      ],
+      source: 'test',
+    }),
+  });
+  try {
+    await h.task.runOnce();
+    const { data } = await h.db.load();
+    const tx = data.assets[0].transactions[1];
+    assert.equal(tx.shares, 100); // 220 ÷ 2.2
+    assert.equal(data.daily.length, 1); // 入账照常
+    assert.ok(h.logs.some((m) => m.includes('[份额补齐]')));
+  } finally {
+    await h.cleanup();
+  }
+});
 
 test('runOnce：QDII 到账日节假日感知（fetchHolidays 注入）——节前净值记节后首个交易日', async () => {
   const qdiiA = { ...A, name: '演示全球精选(QDII)C' };

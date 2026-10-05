@@ -32,6 +32,8 @@ import {
   correctionsForTxRemoval,
   correctionsForFundRemoval,
   pendingAnchorCorrection,
+  pendingShareFills,
+  pendingShareFillsFromHistory,
 } from '../js/analysis.js';
 import { computeState, applyQuote } from '../js/calculator.js';
 
@@ -1249,6 +1251,70 @@ test('pendingAnchorCorrection：悬空待体现触发重锚；未悬空或无待
   });
   assert.equal(pendingAnchorCorrection(daily, pending, 'X', 142.84, '2026-10-04', 'at2'), null);
   assert.equal(pendingAnchorCorrection(daily, [], 'X', 642.84, '2026-10-04', 'at2'), null);
+});
+
+// ---- 当日买入份额自动补齐（pendingShareFills）----
+
+test('pendingShareFills：交易日买入按当日确认净值推算份额（round2）；已有份额与卖出不触碰', () => {
+  const txs = [
+    { type: 'buy', date: '2026-09-30', amount: 1000 }, // 份额待补 → 补
+    { type: 'buy', date: '2026-09-30', amount: 500, shares: 200 }, // 已有份额 → 不动
+    { type: 'sell', date: '2026-09-30', shares: 10 }, // 卖出 → 不动
+  ];
+  assert.deepEqual(pendingShareFills(txs, '2026-09-30', 1.9206), [{ idx: 0, shares: 520.67 }]);
+  // 净值日不匹配（确认净值未公布到该日）→ 不补
+  assert.deepEqual(pendingShareFills(txs, '2026-09-29', 1.9206), []);
+});
+
+test('pendingShareFills：节假日/周末下的单顺延到下一交易日的净值；节假日缺省退化只跳周末', () => {
+  const txs = [{ type: 'buy', date: '2026-10-03', amount: 1000 }]; // 周六（国庆假期中）
+  const holidays = new Set(['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07']);
+  assert.deepEqual(pendingShareFills(txs, '2026-10-08', 1.9206, holidays), [
+    { idx: 0, shares: 520.67 },
+  ]);
+  // 节假日集合缺省：周六下单顺延周一（10-05 只按周末跳过）→ 与 10-05 净值匹配
+  assert.deepEqual(pendingShareFills(txs, '2026-10-05', 1.9206), [{ idx: 0, shares: 520.67 }]);
+});
+
+test('pendingShareFills：净值非法不补；多笔混合只补确认净值日匹配者', () => {
+  const txs = [
+    { type: 'buy', date: '2026-09-30', amount: 1000 },
+    { type: 'buy', date: '2026-09-29', amount: 500 },
+  ];
+  assert.deepEqual(pendingShareFills(txs, '2026-09-30', 0), []);
+  assert.deepEqual(pendingShareFills(txs, '2026-09-30', '非数值'), []);
+  // 09-30 匹配 idx0；09-29 的确认净值日是 09-29 ≠ 当前净值日 → 不补
+  assert.deepEqual(pendingShareFills(txs, '2026-09-30', 1.9206), [{ idx: 0, shares: 520.67 }]);
+});
+
+test('pendingShareFillsFromHistory：取申购日起首个已公布净值日补齐（QDII 跳空日/时滞覆盖）', () => {
+  const txs = [
+    { type: 'buy', date: '2026-09-15', amount: 1000 }, // 09-15/16 净值跳空（海外休市不发净值）
+    { type: 'buy', date: '2026-09-14', amount: 500, shares: 250 }, // 已有份额 → 不动
+  ];
+  const series = [
+    { date: '2026-09-14', nav: 2.0 },
+    { date: '2026-09-17', nav: 2.5 }, // 首个 ≥ 09-15 的已公布净值日
+  ];
+  assert.deepEqual(pendingShareFillsFromHistory(txs, series, []), [{ idx: 0, shares: 400 }]);
+  // 序列窗口未覆盖确认日（超 90 天取数窗口的存量待补）→ 净值不可考，不补、防用数月后的净值错算
+  assert.deepEqual(pendingShareFillsFromHistory(txs, [{ date: '2026-09-17', nav: 2.5 }], []), []);
+});
+
+test('pendingShareFillsFromHistory：申购日非交易日顺延；净值未公布不补；空序列不补', () => {
+  const txs = [{ type: 'buy', date: '2026-10-03', amount: 960.3 }]; // 周六 → 确认日 10-08
+  const holidays = new Set(['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07']);
+  const series = [
+    { date: '2026-10-08', nav: 1.9206 },
+    { date: '2026-10-09', nav: 1.93 },
+  ];
+  assert.deepEqual(pendingShareFillsFromHistory(txs, series, holidays), [{ idx: 0, shares: 500 }]);
+  // 历史末行早于确认日（净值未公布）→ 不补
+  assert.deepEqual(
+    pendingShareFillsFromHistory(txs, [{ date: '2026-10-02', nav: 1.9 }], holidays),
+    [],
+  );
+  assert.deepEqual(pendingShareFillsFromHistory(txs, [], holidays), []);
 });
 
 // ---- 规则报告逐条（网页为无序列表）----
