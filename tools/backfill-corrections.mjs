@@ -62,6 +62,7 @@ const record = {
   from: args.from !== undefined ? round2(args.from) : null,
   to: round2(args.to),
   at: new Date().toISOString(),
+  reason: args.reason ? String(args.reason) : '人工补录本金修正',
 };
 
 const db = createDatabase({ dataDir: './data' });

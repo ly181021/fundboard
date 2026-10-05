@@ -221,6 +221,26 @@ test('nextWorkdayOf：净值日的下一个工作日（跳周末；到账口径 
   assert.equal(nextWorkdayOf('2026-01-02'), '2026-01-05'); // 跨年：周五 → 周一
 });
 
+test('nextWorkdayOf：节假日感知（holidays 集合注入；缺省退化只跳周末）', () => {
+  const holidays = new Set([
+    '2026-09-25', // 中秋
+    '2026-09-26',
+    '2026-09-27',
+    '2026-10-01', // 国庆
+    '2026-10-02',
+    '2026-10-03',
+    '2026-10-04',
+    '2026-10-05',
+    '2026-10-06',
+    '2026-10-07',
+  ]);
+  assert.equal(nextWorkdayOf('2026-09-24', holidays), '2026-09-28'); // 中秋：周四净值 → 节后首个交易日
+  assert.equal(nextWorkdayOf('2026-09-30', holidays), '2026-10-08'); // 国庆：节前最后交易日 → 节后首个交易日
+  assert.equal(nextWorkdayOf('2026-10-09', holidays), '2026-10-12'); // 补班周六（10-10）按休市不算工作日
+  assert.equal(nextWorkdayOf('2026-09-30'), '2026-10-01'); // 缺省（未注入/数据降级）：维持只跳周末
+  assert.equal(nextWorkdayOf('2026-12-31', new Set(['2027-01-01'])), '2027-01-04'); // 跨年：元旦后首日
+});
+
 test('computeDailyProfit：份额 × 涨跌额', () => {
   assert.equal(computeDailyProfit(10000, 0.02), 200);
   assert.equal(computeDailyProfit(10000, -0.01), -100);
@@ -363,6 +383,35 @@ test('applyQuote：到账口径只对 QDII 生效——国内基金周五净值�
   assert.equal(r.dayChangePct, null);
   assert.equal(r.prevDayProfit, null);
   assert.equal(r.dailyProfit, 200); // 最近净值日变动仍可取（汇总层「上一净值日」回退用）
+});
+
+test('applyQuote：QDII 到账日节假日感知——假期中不判到账、节后首个交易日判到账', () => {
+  const quote = {
+    nav: 1.05,
+    nav_date: '2026-09-30',
+    prev_nav: 1.03,
+    prev2_nav: 1.02,
+    change_pct: 1.94,
+    prev_change_pct: 0.98,
+    estimate: null,
+  };
+  const holidays = new Set([
+    '2026-10-01',
+    '2026-10-02',
+    '2026-10-03',
+    '2026-10-04',
+    '2026-10-05',
+    '2026-10-06',
+    '2026-10-07',
+  ]);
+  const QDII_NAME = '演示全球科技互联混合(QDII)人民币C';
+  // 假期中（10-01）：到账日是 10-08，不判新到账 → 当日列为 null（待更新）
+  const inHoliday = applyQuote(offlineState, quote, '2026-10-01', QDII_NAME, holidays);
+  assert.equal(inHoliday.dayProfit, null);
+  // 节后首个交易日（10-08）：判新到账 → 当日列显示这笔收益
+  const arrived = applyQuote(offlineState, quote, '2026-10-08', QDII_NAME, holidays);
+  assert.equal(arrived.dayProfit, 200); // 10000 × (1.05−1.03)
+  assert.equal(arrived.prevDayProfit, 100); // 10000 × (1.03−1.02)
 });
 
 test('applyQuote：QDII 忽略一切估值源（含新浪兜底），只走确认净值', () => {

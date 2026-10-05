@@ -144,31 +144,120 @@ body {
 }
 .sp3-head { display: flex; align-items: center; gap: 10px; padding: 2px 0 10px; cursor: pointer; user-select: none; }
 .sp3-title { font-size: var(--fs-base); font-weight: 600; color: var(--color-muted); white-space: nowrap; }
-/* 本金修正待体现徽标：本金数字立刻更新，日历圆标/曲线打点待入账写入后出现 */
-.corr-pending {
-  flex: none;
-  font-size: var(--fs-sm);
-  color: var(--warn2-ink);
-  background: var(--warn2-bg);
-  border: 1px solid var(--warn2-line);
-  border-radius: 999px;
-  padding: 0 8px;
-  line-height: 17px;
-  white-space: nowrap;
-  cursor: help;
+/* 消息中心铃铛（方案 A：三类消息账本派生不落库；替代原橙/黄两枚内联徽标） */
+/* 铃铛置于视图页签工具区（隐藏金额右侧），面板锚定铃铛正下、右对齐 */
+.msg-bellwrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
-/* 本金跳变未留痕徽标：与"待体现"用不同色系区分，这是要动手补录的告警 */
-.corr-audit {
-  flex: none;
-  font-size: var(--fs-sm);
-  color: var(--warn-ink);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-line);
+.msg-bell {
+  position: relative;
+  width: 24px; /* 与工具区「隐藏金额」按钮边框高度一致（13px 字号 + 8px 内边距 + 边框），视觉同排等高 */
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted);
+}
+.msg-bell:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.msg-cnt {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
   border-radius: 999px;
-  padding: 0 8px;
-  line-height: 17px;
-  white-space: nowrap;
-  cursor: help;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  font-weight: 600;
+}
+.msg-panel {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  width: min(430px, calc(100vw - 48px));
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  z-index: 30;
+}
+.msg-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.msg-mark {
+  font-size: var(--fs-xs);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 400;
+}
+.msg-item {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+}
+.msg-item:last-child {
+  border-bottom: none;
+}
+.msg-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 7px;
+}
+.msg-yellow .msg-dot {
+  background: var(--status-busy);
+} /* 需动手的未留痕：警示黄 */
+.msg-orange .msg-dot {
+  background: var(--warn2-ink);
+} /* 待体现：橙 */
+.msg-blue .msg-dot {
+  background: var(--info);
+} /* 份额待补：信息蓝 */
+.msg-txt {
+  word-break: break-all;
+}
+.msg-unread .msg-txt {
+  font-weight: 600;
+}
+.msg-new {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.msg-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: var(--color-muted);
+  font-size: var(--fs-sm);
 }
 .sp-sum {
   flex: 1;
@@ -274,6 +363,10 @@ body {
   background: var(--color-primary-hover, var(--color-primary));
   border-color: var(--color-primary-hover, var(--color-primary));
 } /* 兜底回落主色本身，绝不出现异色 */
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+} /* 提交中禁用（快照保存防连击），视觉降亮度示意不可点 */
 /* 基金主表（a-table 包装层）：保留卡片外观，antd 内部表格透明融入 */
 .fund-table {
   font-variant-numeric: tabular-nums;

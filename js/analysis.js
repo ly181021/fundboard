@@ -253,16 +253,18 @@ export function profitLevel(v) {
  * @property {number} assets - 入账时刻基金市值（份额×确认净值），供资产曲线前向填充。
  */
 /**
- * 到账入账逻辑：基金净值日更新时生成单条记录（口径A，与 tools/migrate-daily-arrival.mjs 存量重建同源）。
- * 国内基金：到账日 = 净值日（晚间披露净值）；
- * QDII（entries 含 qdii:true，基金名称识别）：到账日 = navDate 的下一个工作日 nextWorkdayOf。
- * 与 js/calculator.js applyQuote「当日/昨日列」复用实现，防止前后端口径漂移。
+ * 到账入账逻辑：基金净值日更新时生成单条记录，与 tools/migrate‑daily‑arrival.mjs 存量重建同源。
+ * 国内基金：到账日等于净值日，净值于晚间披露；
+ * QDII，entries携带qdii:true，通过基金名称辅助识别：到账日取navDate之后第一个A股交易日。
+ * 使用nextWorkdayOf计算，节假日集合由调用方通过js/tradingCalendar.js注入，缺失输入则仅跳过周末做降级处理。
+ * 与js/calculator.js applyQuote的当日、昨日列复用同一套实现，避免前后端口径漂移。
  *
- * 收益仅归属交易日；周末/节假日补拉，不会把上个交易日净值记在补拉当日。
- * entries: [{code, navDate, earnings, invested, assets, qdii}]（估值模式不传入）。
- * 幂等：相同 code+navDate 存在则跳过新增；返回 { list, changed }。
+ * 收益仅归属对应交易日。周末、节假日执行补拉，不会将上一交易日净值记录至补拉当日。
+ * entries：[{code, navDate, earnings, invested, assets, qdii}]，估值模式下不传入该字段集合。
+ * 幂等逻辑：code加navDate已存在则跳过新增；返回 { list, changed }。
  */
-export function bookArrivals(daily, entries) {
+
+export function bookArrivals(daily, entries, holidays) {
   const list = Array.isArray(daily) ? [...daily] : [];
   let changed = false;
   for (const e of entries || []) {
@@ -275,7 +277,7 @@ export function bookArrivals(daily, entries) {
     if (lastNav != null && !(e.navDate > lastNav)) continue; // 净值日期未推进 → 不重复入账
     list.push({
       code: e.code,
-      date: e.qdii ? nextWorkdayOf(e.navDate) : e.navDate,
+      date: e.qdii ? nextWorkdayOf(e.navDate, holidays) : e.navDate,
       navDate: e.navDate,
       earnings: round2(e.earnings ?? 0),
       invested: round2(e.invested ?? 0),
@@ -418,7 +420,307 @@ export function buildPrincipalCorrection({
 }) {
   const prevInvested = computeState(prevSnapshot, transactions).totalInvested;
   const nextInvested = computeState(nextSnapshot, transactions).totalInvested;
-  return principalCorrection({ code, prevInvested, nextInvested, date, at });
+  const rec = principalCorrection({ code, prevInvested, nextInvested, date, at });
+  return rec ? { ...rec, reason: '手动修正' } : rec;
+}
+/**
+ * 重加已有到账日志的基金时生成本金修正留痕，口径Ⅰ，由submitSnapshot新增分支调用。
+ *
+ * 末行取值：按（到账日，净值日）双键升序取末行。同日多行为节假日合并到账的真实形态，
+ * QDII多个连续净值日的到账日会落在同一个首个A股交易日，取净值日更新的行作为最新本金快照。
+ * 仅按到账日排序会依赖数组插入顺序，双键排序消除该隐式依赖。
+ *
+ * 幂等闸：corrections已存在相同code、生效日、前后本金的记录，比对忽略at时间戳，则返回null。
+ * 服务端并集去重基于完整记录比对，时间戳不同不会触发去重。corrections集合只增不减，重复记录会形成永久噪声。
+ *
+ * 记录生成复用principalCorrection。round2舍入后本金相等，用于规避同本金重加产生虚假记录；入参非法时直接透传null。
+ * 本函数为纯函数，无副作用，承诺不抛出异常。date与at由调用方注入，函数内部不读取系统时间。
+ *
+ * @param {Array} daily 到账日志 [{code, date, navDate, invested}]
+ * @param {Array} corrections 既有修正留痕记录
+ * @param {string} code 基金代码
+ * @param {number} nextInvested 重加快照的生效本金，新增基金无交易增量，取自快照total_invested
+ * @param {string} date 修正生效日，为重加操作当日
+ * @param {string|null} at 审计时间戳
+ * @returns {Object|null} 留痕记录；无日志、同本金重加、重复提交、入参非法场景均返回null
+ */
+export function reAddCorrection(daily, corrections, code, nextInvested, date, at = null) {
+  const rows = (Array.isArray(daily) ? daily : []).filter(
+    (r) => r && r.code === code && r.date && r.invested != null,
+  );
+  if (rows.length === 0) return null;
+  const last = rows
+    .sort(
+      (a, b) =>
+        String(a.date).localeCompare(String(b.date)) ||
+        String(a.navDate ?? '').localeCompare(String(b.navDate ?? '')),
+    )
+    .pop();
+  const from = round2(last.invested);
+  const to = round2(nextInvested);
+  const isDup = (Array.isArray(corrections) ? corrections : []).some(
+    (c) =>
+      c &&
+      c.code === code &&
+      String(c.date) === String(date) &&
+      round2(c.from) === from &&
+      round2(c.to) === to,
+  );
+  if (isDup) return null;
+  const rec = principalCorrection({ code, prevInvested: last.invested, nextInvested, date, at });
+  return rec ? { ...rec, reason: '重新添加基金' } : rec;
+}
+
+/**
+ * 删除一笔交易将失去解释的历史跳变（删除自动留痕用）。
+ * 删除前后各跑一次 auditPrincipalJumps，对比该代码"未留痕"集合的增量：
+ * 删除前后都未留痕的跳变非本次删除造成，不返回。
+ * 纯函数无副作用，承诺不抛出异常；入参不可变。
+ */
+export function jumpsLostByTxRemoval(daily, corrections, assets, code, txIndex) {
+  const fund = (Array.isArray(assets) ? assets : []).find((a) => a && a.code === code);
+  if (!fund || !Array.isArray(fund.transactions)) return [];
+  if (txIndex == null || txIndex < 0 || txIndex >= fund.transactions.length) return [];
+  const key = (j) => `${j.date}|${round2(j.from)}|${round2(j.to)}`;
+  const beforeKeys = new Set(
+    auditPrincipalJumps(daily, corrections, assets)
+      .unexplained.filter((j) => j.code === code)
+      .map(key),
+  );
+  const reduced = (Array.isArray(assets) ? assets : []).map((a) =>
+    a && a.code === code
+      ? { ...a, transactions: a.transactions.filter((_, i) => i !== txIndex) }
+      : a,
+  );
+  return auditPrincipalJumps(daily, corrections, reduced)
+    .unexplained.filter((j) => j.code === code && !beforeKeys.has(key(j)))
+    .map(({ date, from, to }) => ({ date, from, to }));
+}
+
+/**
+ * 删除一笔交易的自动留痕（口径Ⅰ；deleteTx 落库前调用）：
+ * ① 失解释的历史跳变 → 记 {date: 跳变日, from, to}，即时认领标注；
+ * ② 本金回落/抬升 → 删除改变生效本金且与日志末行不等时记 {date: 当日, from: 末行, to: 删除后生效本金}
+ *    （待体现形态，下次入账写入新本金时认领；删现金分红等本金不变场景不记）。
+ * 幂等：同 code+生效日+前后本金已存在即跳过（与补录工具、reAddCorrection 同口径）。
+ * 纯函数无副作用，承诺不抛出异常；date/at 由调用方注入。
+ * @returns {Array} 待追加的修正记录，可能为空数组
+ */
+export function correctionsForTxRemoval(
+  daily,
+  corrections,
+  assets,
+  code,
+  txIndex,
+  date,
+  at = null,
+) {
+  const known = Array.isArray(corrections) ? corrections : [];
+  const fund = (Array.isArray(assets) ? assets : []).find((a) => a && a.code === code);
+  if (!fund || !Array.isArray(fund.transactions)) return [];
+  if (txIndex == null || txIndex < 0 || txIndex >= fund.transactions.length) return [];
+  const recs = jumpsLostByTxRemoval(daily, known, assets, code, txIndex).map((j) => ({
+    code,
+    field: 'total_invested',
+    date: String(j.date),
+    from: round2(j.from),
+    to: round2(j.to),
+    at,
+    reason: '删除交易',
+  }));
+  const rows = (Array.isArray(daily) ? daily : []).filter(
+    (r) => r && r.code === code && r.date && r.invested != null,
+  );
+  const tail =
+    rows.length > 0
+      ? rows
+          .slice()
+          .sort(
+            (a, b) =>
+              String(a.date).localeCompare(String(b.date)) ||
+              String(a.navDate ?? '').localeCompare(String(b.navDate ?? '')),
+          )
+          .pop()
+      : null;
+  const remaining = fund.transactions.filter((_, i) => i !== txIndex);
+  const effectiveAfter = round2(computeState(fund.snapshot, remaining).totalInvested);
+  if (tail && round2(tail.invested) !== effectiveAfter) {
+    recs.push({
+      code,
+      field: 'total_invested',
+      date: String(date ?? ''),
+      from: round2(tail.invested),
+      to: effectiveAfter,
+      at,
+      reason: '删除交易',
+    });
+  }
+  return recs.filter(
+    (r) =>
+      !known.some(
+        (c) =>
+          c &&
+          c.code === r.code &&
+          String(c.date) === r.date &&
+          round2(c.from) === r.from &&
+          round2(c.to) === r.to,
+      ),
+  );
+}
+
+/**
+ * 删除基金的封账留痕（口径Ⅰ；deleteFund 落库前调用）：
+ * 该基金全部非"修正留痕"状态的跳变逐跳补修正记录——交易解释的将随交易一并删除而失解释，
+ * 未留痕的本来就缺解释；已认领的跳过。删除后不再产生新入账行，无未来回落形态。
+ * 纯函数无副作用，承诺不抛出异常；date/at 由调用方注入。
+ * @returns {Array} 待追加的修正记录，可能为空数组
+ */
+export function correctionsForFundRemoval(daily, corrections, assets, code, date, at = null) {
+  const known = Array.isArray(corrections) ? corrections : [];
+  const recs = auditPrincipalJumps(daily, known, assets)
+    .jumps.filter((j) => j.code === code && j.status !== '修正留痕')
+    .map((j) => ({
+      code,
+      field: 'total_invested',
+      date: String(j.date),
+      from: round2(j.from),
+      to: round2(j.to),
+      at,
+      reason: '删除基金',
+    }));
+  return recs.filter(
+    (r) =>
+      !known.some(
+        (c) =>
+          c &&
+          c.code === r.code &&
+          String(c.date) === r.date &&
+          round2(c.from) === r.from &&
+          round2(c.to) === r.to,
+      ),
+  );
+}
+
+/**
+ * 悬空待体现修正的重锚（口径Ⅰ；submitTrade 落库前调用）：
+ * 待体现修正的 to 与当前生效本金不等时永远无法被日志认领（悬空），"待体现"橙标将永久驻留
+ * （典型：删除交易后按修正后的金额重录）。此时追加一条 to = 当前生效本金的锚记录，
+ * 下次入账认领后按"被覆盖"规则使悬空记录退出。无悬空记录返回 null（常规录交易零动作）。
+ * 纯函数无副作用，承诺不抛出异常；date/at 由调用方注入。
+ */
+export function pendingAnchorCorrection(
+  daily,
+  corrections,
+  code,
+  currentEffective,
+  date,
+  at = null,
+) {
+  const known = Array.isArray(corrections) ? corrections : [];
+  const doomed = pendingCorrections(daily, known).filter(
+    (p) => p.code === code && round2(p.to) !== round2(currentEffective),
+  );
+  if (doomed.length === 0) return null;
+  const rows = (Array.isArray(daily) ? daily : []).filter(
+    (r) => r && r.code === code && r.date && r.invested != null,
+  );
+  const tail =
+    rows.length > 0
+      ? rows
+          .slice()
+          .sort(
+            (a, b) =>
+              String(a.date).localeCompare(String(b.date)) ||
+              String(a.navDate ?? '').localeCompare(String(b.navDate ?? '')),
+          )
+          .pop()
+      : null;
+  return {
+    code,
+    field: 'total_invested',
+    date: String(date ?? ''),
+    from: tail ? round2(tail.invested) : null,
+    to: round2(currentEffective),
+    at,
+    reason: '录入新交易',
+  };
+}
+
+/** 买入的确认净值日：申购日为交易日取当日，否则顺延下一交易日（holidays 集合注入）。非日期串返回 null。 */
+function confirmNavDateOf(txDate, holidaySet) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(txDate))) return null;
+  const day = parseISODate(txDate).getDay();
+  const isTrading = day !== 0 && day !== 6 && !holidaySet.has(String(txDate));
+  return isTrading ? String(txDate) : nextWorkdayOf(txDate, holidaySet);
+}
+
+/**
+ * 当日买入的份额自动补齐（份额待补全自动化的纯函数核心；入账任务与页面行情刷新共用）。
+ * 买入的确认净值日 = 买入当日（交易日）或其后的首个交易日（周末/节假日下的单顺延，与到账口径 A 同源）；
+ * 行情侧公布净值日与确认净值日一致时，按 份额 = 金额 ÷ 确认净值（round2）推算。
+ * 已有份额、卖出、分红不触碰；确认净值日未到不补（严格相等，错过公布夜的待补走历史驱动通道或手动路径）。
+ * 补齐只写份额、不改金额：本金口径不受影响，与本金跳变巡检、修正留痕体系零联动。
+ * 纯函数无副作用，承诺不抛出异常；holidays 集合注入（Set/数组均可，缺省退化只跳周末）。
+ * @param {Array} transactions 交易列表
+ * @param {string} navDate 行情侧已公布的确认净值所属日期（YYYY-MM-DD）
+ * @param {number} nav 该日确认净值
+ * @param {Set|Array} holidays 法定节假日集合
+ * @returns {Array} [{idx, shares}] 待补位置与推算份额，可能为空数组
+ */
+export function pendingShareFills(transactions, navDate, nav, holidays = []) {
+  const navNum = Number(nav);
+  if (!Array.isArray(transactions) || !navDate || !Number.isFinite(navNum) || navNum <= 0) {
+    return [];
+  }
+  const holidaySet =
+    holidays instanceof Set ? holidays : new Set(Array.isArray(holidays) ? holidays : []);
+  const fills = [];
+  transactions.forEach((t, idx) => {
+    if (!t || t.type !== 'buy' || t.shares != null) return;
+    if (!t.date || !Number.isFinite(Number(t.amount))) return;
+    const confirmDate = confirmNavDateOf(t.date, holidaySet);
+    if (!confirmDate || String(navDate) !== confirmDate) return;
+    fills.push({ idx, shares: round2(Number(t.amount) / navNum) });
+  });
+  return fills;
+}
+
+/**
+ * 份额待补的历史净值驱动补齐（服务端入账任务对存在待补的基金拉取历史净值后调用）。
+ * 取确认净值日起首个已公布净值日（series 升序中首个 date ≥ 确认日）的净值推算份额：
+ * 覆盖 QDII 公布时滞（T+1/T+2）、海外休市导致的净值跳空日、补发跳日，以及错过行情快照窗口的存量待补。
+ * 净值未公布到确认日（series 末行早于确认日）不补，等待下轮。
+ * 纯函数无副作用，承诺不抛出异常；holidays 集合注入（Set/数组均可，缺省退化只跳周末）。
+ * @param {Array} transactions 交易列表
+ * @param {Array} series 历史净值序列（升序，[{date, nav}]，fetchHistory 产物）
+ * @param {Set|Array} holidays 法定节假日集合
+ * @returns {Array} [{idx, shares}] 待补位置与推算份额，可能为空数组
+ */
+export function pendingShareFillsFromHistory(transactions, series, holidays = []) {
+  const holidaySet =
+    holidays instanceof Set ? holidays : new Set(Array.isArray(holidays) ? holidays : []);
+  const rows = (Array.isArray(series) ? series : []).filter(
+    (r) =>
+      r &&
+      /^\d{4}-\d{2}-\d{2}$/.test(String(r.date)) &&
+      Number.isFinite(Number(r.nav)) &&
+      Number(r.nav) > 0,
+  );
+  const fills = [];
+  if (!Array.isArray(transactions) || rows.length === 0) return fills;
+  transactions.forEach((t, idx) => {
+    if (!t || t.type !== 'buy' || t.shares != null) return;
+    if (!t.date || !Number.isFinite(Number(t.amount))) return;
+    const confirmDate = confirmNavDateOf(t.date, holidaySet);
+    if (!confirmDate) return;
+    // 历史净值只有最近 90 天，够不到确认日就放弃补齐：
+    // 否则下面 find 会拿到窗口里第一天的净值去算份额
+    if (String(rows[0].date) > confirmDate) return;
+    const hit = rows.find((r) => String(r.date) >= confirmDate); // 首个已公布净值日 ≥ 确认日
+    if (!hit) return; // 净值未公布到确认日 → 等待
+    fills.push({ idx, shares: round2(Number(t.amount) / Number(hit.nav)) });
+  });
+  return fills;
 }
 
 /**

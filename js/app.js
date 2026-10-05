@@ -67,6 +67,8 @@ import {
   maskText,
   loadBool,
   saveBool,
+  loadMsgReadSigs,
+  saveMsgReadSigs,
   loadBlockOrder,
   saveBlockOrder,
   visibleOrderOf,
@@ -94,6 +96,11 @@ import {
   computeHoldingProfitSeries,
   resolveCorrections,
   buildPrincipalCorrection,
+  reAddCorrection,
+  correctionsForTxRemoval,
+  correctionsForFundRemoval,
+  pendingAnchorCorrection,
+  pendingShareFills,
   pendingCorrections,
   auditPrincipalJumps,
 } from './analysis.js';
@@ -405,10 +412,29 @@ const app = createApp({
       if (!fund) return;
       const tx = fund.transactions[item.idx];
       const ok = confirm(
-        `确定删除这笔「${txLabel(tx)} ${tx.date || ''}」记录吗？\n删除后本金与收益将按剩余记录重新计算。`,
+        `确定删除这笔「${txLabel(tx)} ${tx.date || ''}」记录吗？\n删除后本金与收益将按剩余记录重新计算，历史到账收益不受影响。`,
       );
       if (!ok) return;
+      // 自动补留痕（口径Ⅰ）：失解释的历史跳变 + 本金回落，删除即补、徽标不再出现；判定失败不阻断删除
+      let recs = [];
+      try {
+        recs = correctionsForTxRemoval(
+          data.daily,
+          data.corrections,
+          data.assets,
+          fund.code,
+          item.idx,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：删除主流程不受影响，容错属刻意设计
+      }
       fund.transactions.splice(item.idx, 1);
+      if (recs.length > 0) {
+        if (!Array.isArray(data.corrections)) data.corrections = [];
+        data.corrections.push(...recs);
+      }
       persist();
       refreshTxModal();
     }
@@ -1137,12 +1163,30 @@ const app = createApp({
     /** 删除基金：连同快照与交易记录一并移除；confirm 确认后走统一持久化 */
     function deleteFund(fund) {
       const ok = confirm(
-        `确定删除「${fund.name}（${fund.code}）」吗？\n将同时删除其快照与全部交易记录，且不可撤销。\n（删除前可先点"导出"备份）`,
+        `确定删除「${fund.name}（${fund.code}）」？\n将删除快照、全部交易记录，操作不可撤销。调整数据请用「编辑」，删除前可导出备份。`,
       );
       if (!ok) return;
+      // 自动补留痕（口径Ⅰ）：封账——非"修正留痕"跳变逐跳补记录，删除后徽标不再出现；判定失败不阻断删除
+      let recs = [];
+      try {
+        recs = correctionsForFundRemoval(
+          data.daily,
+          data.corrections,
+          data.assets,
+          fund.code,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：删除主流程不受影响，容错属刻意设计
+      }
       const idx = data.assets.findIndex((a) => a.id === fund.id);
       if (idx >= 0) {
         data.assets.splice(idx, 1);
+        if (recs.length > 0) {
+          if (!Array.isArray(data.corrections)) data.corrections = [];
+          data.corrections.push(...recs);
+        }
         persist();
       }
     }
@@ -1160,7 +1204,17 @@ const app = createApp({
     // 行情轮询时段：交易日 9:30 起（盘中估值随行情更新 + 晚间确认净值发布），节假日按 A 股交易日历跳过
     const tradingCalendar = createTradingCalendar();
     const tradingDayCache = { date: null, ok: true }; // 未知日期按工作日粗判（乐观，下一轮校正）
+    const arrivalHolidays = ref(null); // QDII 到账判定的节假日集合；null=未加载（判定退化为只跳周末）
+    let arrivalHolidaysPromise = null;
+    function ensureArrivalHolidays() {
+      if (arrivalHolidaysPromise) return arrivalHolidaysPromise;
+      const y = new Date().getFullYear();
+      // 今去年三年并集：覆盖元旦/跨年两端的净值日与到账日（日历按年缓存，重复调用零请求）
+      arrivalHolidaysPromise = tradingCalendar.holidaysOfYears([y - 1, y, y + 1]);
+      return arrivalHolidaysPromise;
+    }
     async function refreshTradingDay() {
+      arrivalHolidays.value = await ensureArrivalHolidays();
       const d = todayStr();
       if (tradingDayCache.date === d) return;
       tradingDayCache.date = d;
@@ -1185,7 +1239,7 @@ const app = createApp({
           const state = computeState(a.snapshot, a.transactions);
           const quote = quotesMap.value[a.code];
           const merged = quote
-            ? applyQuote(state, quote, todayStr(), a.name)
+            ? applyQuote(state, quote, todayStr(), a.name, arrivalHolidays.value)
             : {
                 ...state,
                 latestNav: null,
@@ -1478,10 +1532,23 @@ const app = createApp({
       const v = summary.value.portfolio?.total?.prevDayProfit;
       return v != null ? maskText(formatMoney(v), summaryHidden.value) : '—';
     });
+    // 休市日（closed）主/次标签直接带数据日。
+    // 交易日主/次标签用短式"当日/昨日"（与主表列名一致）。
+    const stripMainLabel = computed(() => {
+      if (profitState.value !== 'closed') return '当日';
+      return maxNavDate.value ? `收益（${maxNavDate.value.slice(5)}）` : '当日';
+    });
+    const stripPrevLabel = computed(() => {
+      if (profitState.value !== 'closed') return '昨日';
+      const dates = [
+        ...new Set(fundStates.value.map((f) => f.state?.navDate).filter(Boolean)),
+      ].sort((a, b) => (a < b ? 1 : -1));
+      return dates[1] ? `前一日（${String(dates[1]).slice(5)}）` : '昨日';
+    });
     const stripDateLabel = computed(() => {
-      // 日期标注：closed/prevday 展示数据所属净值日
+      // 日期标注：closed 态已并入主标签（收益（09-30）），不再重复；prevday（交易日 22:00 后）保留小字
       const st = profitState.value;
-      if (st !== 'closed' && st !== 'prevday') return '';
+      if (st !== 'prevday') return '';
       const d = maxNavDate.value;
       return d ? `净值日 ${d.slice(5)}` : '';
     });
@@ -2288,14 +2355,31 @@ const app = createApp({
         }
         fund.transactions.push(tx);
       }
+      // 悬空待体现修正的重锚（口径Ⅰ）：删除后重录会使预记回落修正失配（to ≠ 新生效本金），
+      // 锚记录下次入账认领后按"被覆盖"规则使悬空记录退出；无悬空时零动作；判定失败不阻断录入
+      let anchorRec = null;
+      try {
+        anchorRec = pendingAnchorCorrection(
+          data.daily,
+          data.corrections,
+          fund.code,
+          computeState(fund.snapshot, fund.transactions).totalInvested,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：录入主流程不受影响，容错属刻意设计
+      }
+      if (anchorRec) {
+        if (!Array.isArray(data.corrections)) data.corrections = [];
+        data.corrections.push(anchorRec);
+      }
       persist();
       showTradeForm.value = false;
       resetTradeForm(); // 保存后同样收敛到干净态（与打开入口共用同一重置）
-      // 当日买入无份额（净值未公布）：提示补份额路径（交易列表 → 编辑）
+      // 当日买入无份额（净值未公布）：自动补齐口径说明（确认净值公布后系统补，手动编辑为修正手段）
       if (tx.type === 'buy' && tx.shares == null) {
-        antd.message.success(
-          '买入已记录——份额待确认（净值公布后，在「记录」里点该笔「编辑」补上即可）',
-        );
+        antd.message.success('买入已记录——份额待补：确认净值公布后系统自动补齐，也可手动编辑修正');
       }
     }
 
@@ -2310,6 +2394,7 @@ const app = createApp({
       totalInvested: '',
     });
     const snapshotEditing = ref(null); // 编辑模式：被编辑基金 id（null = 初次导入）
+    const snapshotSubmitting = ref(false); // 提交中标志：异步身份校验等待期禁用保存，防连击重复建仓
     const snapshotCostMismatch = computed(() => {
       // 摊薄成本（成本价×份额）≠ 累计投入本金 → 通常有卖出/现金分红；非阻断黄条，仅提醒
       if (!snapshotEditing.value) return false;
@@ -2384,6 +2469,8 @@ const app = createApp({
     }
 
     function submitSnapshot() {
+      if (snapshotSubmitting.value) return; // 身份校验异步等待期连击会重复建仓，同标志未复位直接忽略
+      snapshotSubmitting.value = true;
       const holdAmount = parseFloat(snapshotForm.holdAmount);
       const costPrice = parseFloat(snapshotForm.costPrice);
       const holdShares = parseFloat(snapshotForm.holdShares);
@@ -2395,16 +2482,22 @@ const app = createApp({
       if (!Number.isFinite(holdShares)) missing.push('持有份额');
       if (!Number.isFinite(totalInvested)) missing.push('累计投入本金');
       if (missing.length > 0) {
+        snapshotSubmitting.value = false;
         alert('请填写：' + missing.join('、'));
         return;
       }
-      validateFundIdentity().then((problem) => {
-        if (problem) {
-          alert(problem);
-          return;
-        }
-        doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested });
-      });
+      validateFundIdentity()
+        .then((problem) => {
+          if (problem) {
+            alert(problem);
+            return;
+          }
+          doSubmitSnapshot({ holdAmount, costPrice, holdShares, totalInvested });
+        })
+        .finally(() => {
+          // 校验拦截、落库完成或链路异常均复位按钮，防保存被永久禁用
+          snapshotSubmitting.value = false;
+        });
     }
 
     /**
@@ -2508,10 +2601,34 @@ const app = createApp({
         },
         transactions: [],
       };
+      // 重加已有到账日志的代码时自动补修正留痕（口径Ⅰ）：末行双键取最新 + 幂等闸防冗余。
+      // 留痕是审计层，判定失败不阻断保存（跳过留痕与追加句）。
+      let reAddRec = null;
+      try {
+        reAddRec = reAddCorrection(
+          data.daily,
+          data.corrections,
+          newFund.code,
+          totalInvested,
+          todayStr(),
+          new Date().toISOString(),
+        );
+      } catch {
+        // 留痕判定可弃：保存主流程不受影响，容错属刻意设计
+      }
+      if (reAddRec) {
+        if (!Array.isArray(data.corrections)) data.corrections = [];
+        data.corrections.push(reAddRec);
+      }
       data.assets.push(newFund);
       persist();
       showSnapshotForm.value = false;
       resetSnapshotForm(); // 重置
+      antd.message.success(
+        reAddRec
+          ? `快照已保存。检测到历史到账日志，已自动记录本金修正 ${reAddRec.from}→${reAddRec.to}，下次入账后标注`
+          : '快照已保存',
+      );
     }
 
     function exportData() {
@@ -2668,27 +2785,75 @@ const app = createApp({
 
     // 到账日志天数（收益日历"不足 2 天暂不绘制"的判据）
     const dailyLen = computed(() => aggregateDaily(data.daily).length);
-    // 待体现徽标：改完本金数字立刻更新，但圆标/打点要等入账把新本金写进日志才出现；
-    // 这段空窗期用一枚徽标明确"已记录、待体现"，避免"改了没反应"分不清是没记录还是没到标注日。
+    // 待体现状态来源：改完本金数字立刻更新，但圆标/打点要等入账把新本金写进日志才出现；
+    // 这段空窗期由消息中心橙标承接"已记录、待体现"，避免"改了没反应"分不清是没记录还是没到标注日。
     const corrPending = computed(() => pendingCorrections(data.daily, data.corrections));
-    const corrPendingTitle = computed(
-      () =>
-        corrPending.value
-          .map((c) => `${c.code} ${c.from ?? '—'}→${c.to ?? '—'}（修正日 ${c.date ?? '—'}）`)
-          .join('；') + '——下次入账把新本金写入到账日志后，自动在日历与资产曲线标注',
-    );
     // 本金跳变自动巡检（口径 Ⅰ）：判定与服务端每轮入账后的巡检同源（analysis.auditPrincipalJumps），
     // 检出"无交易解释且无修正留痕"的跳变时提示补录——页面开着就自动发现，不必手动跑工具。
     const principalAudit = computed(() =>
       auditPrincipalJumps(data.daily, data.corrections, data.assets),
     );
-    const jumpAuditTitle = computed(
-      () =>
-        principalAudit.value.unexplained
-          .map((j) => `${j.code} ${j.date} ${j.from}→${j.to}`)
-          .join('；') +
-        '——该本金变化既无交易解释、也无修正留痕（通常是手动改过本金但未补录）；确认后可用 node tools/backfill-corrections.mjs 补录',
+
+    // ---- 消息中心（方案 A：三类消息由账本实时派生，不落库；已读签名存 localStorage）----
+    const messages = computed(() => {
+      const nameOf = new Map(data.assets.map((a) => [a.code, a.name]));
+      const nameOfCode = (c) => nameOf.get(c) ?? c; // 基金已删除时名称不可考，回退代码
+      const list = [];
+      // 黄（需动手）：无交易解释也无修正留痕——仅存量遗留或绕过页面改数据会出现
+      for (const j of principalAudit.value.unexplained) {
+        list.push({
+          type: 'yellow',
+          sig: `y|${j.code}|${j.date}|${j.from}|${j.to}`,
+          txt: `${nameOfCode(j.code)}：${j.date} 检测到本金发生无来源记录的变动。大概率为绕过页面直接修改数据，请维护人员核查并补录相关记录。`,
+        });
+      }
+      // 橙（状态）：修正已记好、等下次入账体现
+      for (const c of corrPending.value) {
+        const why = c.reason ? `（${c.reason}）` : '';
+        list.push({
+          type: 'orange',
+          sig: `o|${c.code}|${c.date}|${c.to}|${c.at ?? ''}`,
+          txt: `${nameOfCode(c.code)}：${c.date ?? '—'} 检测到本金发生调整${why}，调整为 ${c.to ?? '—'} 元。调整已记录，待下一次入账后自动同步日历、走势图，用户无需执行操作。`,
+        });
+      }
+      // 蓝（状态）：买入金额已记、份额等确认净值公布后自动补齐
+      for (const f of data.assets) {
+        if (f.asset_type !== 'fund') continue;
+        (f.transactions || []).forEach((t, idx) => {
+          if (!t || t.type !== 'buy' || t.shares != null) return;
+          list.push({
+            type: 'blue',
+            sig: `b|${f.code}|${t.date}|${t.amount}|${idx}`,
+            txt: `${f.name}，${t.date} 发生 ${t.amount} 元买入，对应份额暂未补齐。待官方净值公布，系统将自动完成份额计算补录，用户无需执行操作。`,
+          });
+        });
+      }
+      const rank = { yellow: 0, orange: 1, blue: 2 }; // 需动手的在前，同类新者在前
+      return list.sort((a, b) => rank[a.type] - rank[b.type] || (a.sig < b.sig ? 1 : -1));
+    });
+    const msgReadSigs = ref(loadMsgReadSigs(localStorage));
+    const unreadCount = computed(
+      () => messages.value.filter((m) => !msgReadSigs.value.includes(m.sig)).length,
     );
+    const msgPanelOpen = ref(false);
+    function toggleMsgPanel() {
+      msgPanelOpen.value = !msgPanelOpen.value;
+    }
+    function markAllMsgRead() {
+      msgReadSigs.value = messages.value.map((m) => m.sig);
+      saveMsgReadSigs(localStorage, msgReadSigs.value);
+    }
+    // 点外部关闭：事件挂在铃铛容器外即视为"外部"（铃铛与面板自身的点击不冒泡到此判定）
+    const msgBellWrapEl = ref(null);
+    function onGlobalPointerdownForMsg(e) {
+      if (!msgPanelOpen.value) return;
+      if (msgBellWrapEl.value && !msgBellWrapEl.value.contains(e.target)) {
+        msgPanelOpen.value = false;
+      }
+    }
+    function onGlobalKeydown(e) {
+      if (e.key === 'Escape') msgPanelOpen.value = false;
+    }
 
     const round2 = (v) => Math.round(v * 100) / 100;
 
@@ -2709,12 +2874,24 @@ const app = createApp({
         dailyProfit: summary.value.totalDailyProfit ?? 0,
         yesterdayProfit: summary.value.totalYesterdayProfit,
       };
-      // 分析口径的数据日期：估值模式为今天、确认模式为最新净值日期（QDII 等滞后品种自然靠后）
-      const dataDate =
-        states
-          .map((f) => f.state.dataDate ?? f.state.navDate)
-          .filter(Boolean)
-          .reduce((m, d) => (d > m ? d : m), null) ?? todayStr();
+      // 分析口径的数据日期：估值模式为今天、确认模式为最新净值日期（QDII 等滞后品种自然靠后）；
+      // 非交易日（周末/法定节假日，交易日历感知）钳制为只取确认净值日——估值模式的"今天"不参与，
+      // 否则假期里标题会冒充"今日行情分析"且日期挂在假期日上
+      const isClosedToday = tradingDayFlag.value === false;
+      // 候选日期为空（行情缺 nav_date 等残缺形态）时不得兜底成自然日今天——
+      // 假期里会冒充"今日行情分析"且日期挂在假期日；诚实做法是不渲染分析卡。
+      // max 初始值必须取首个候选（字符串对字符串比较）：null 起比时 '日期' > null 走数值比较
+      // 得 NaN 恒为 false，max 永远停在 null——此前 dataDate 恒为兜底"今天"正是这个根因
+      const dateCandidates = [];
+      for (const f of states) {
+        const d = isClosedToday ? f.state.navDate : (f.state.dataDate ?? f.state.navDate);
+        if (d) dateCandidates.push(String(d));
+      }
+      let dataDate = dateCandidates[0] ?? null;
+      for (const d of dateCandidates) {
+        if (d > dataDate) dataDate = d;
+      }
+      if (!dataDate) return null;
       const reportParts = {
         today: todayStr(),
         dataDate,
@@ -2747,6 +2924,8 @@ const app = createApp({
           month: 'long',
           day: 'numeric',
         }),
+        genTime: quoteFetchedAt.value ?? null, // 生成时刻（最近一次行情成功拉取，HH:mm）
+        closed: isClosedToday, // 休市中（周末/法定节假日）：标题回落"最新行情分析"，节后首个交易日恢复
         report,
         reportLines,
         reportLinesRedacted,
@@ -2758,10 +2937,12 @@ const app = createApp({
     /**
      * 逐基金到账入账（与服务端 lib/snapshot.js 同口径，共用 analysis.js 的 bookArrivals）：
      * 确认净值模式下，基金净值日期比日志里最新一条更新 → 按标准到账日记一条
-     * （口径 A：国内=净值日、QDII=下一工作日，收益明细只落在交易日）；估值模式不参与。
+     * （到账日映射：国内=净值日、QDII=净值日后首个交易日（节假日感知），收益明细只落在交易日）；估值模式不参与。
      */
-    function bookDailyArrivals() {
+    async function bookDailyArrivals() {
       const entries = [];
+      const arrivalHolidays = await ensureArrivalHolidays();
+      let shareFills = 0;
       for (const f of fundStates.value) {
         if (f.state.mode === 'estimate') continue; // 估值不入账，只记确认净值
         if (f.state.holdShares <= 0) continue;
@@ -2774,11 +2955,30 @@ const app = createApp({
           assets: f.state.holdShares * f.state.latestNav,
           qdii: /QDII/i.test(f.name ?? ''),
         });
+        // 份额待补自动补齐（份额=金额÷确认净值；入账后执行，与手动编辑路径口径一致）
+        try {
+          const fund = data.assets.find((a) => a.code === f.code);
+          const fills = pendingShareFills(
+            fund?.transactions,
+            f.state.navDate,
+            f.state.latestNav,
+            arrivalHolidays,
+          );
+          for (const fill of fills) {
+            fund.transactions[fill.idx].shares = fill.shares;
+            shareFills++;
+          }
+        } catch {
+          // 补齐判定可弃：入账主流程不受影响，容错属刻意设计
+        }
       }
       if (entries.length === 0) return;
-      const { list, changed } = bookArrivals(data.daily, entries);
-      if (!changed) return; // 净值日期均未推进，不触发持久化
+      const { list, changed } = bookArrivals(data.daily, entries, arrivalHolidays);
+      if (!changed && shareFills === 0) return; // 净值日期均未推进且无补齐，不触发持久化
       data.daily = list;
+      if (shareFills > 0) {
+        antd.message.success(`已按确认净值自动补齐 ${shareFills} 笔买入份额`);
+      }
       persist();
     }
 
@@ -2932,9 +3132,10 @@ const app = createApp({
       ),
     );
 
-    /** 当日解读入库：同日覆盖（重跑解读只留最新一条）、升序、上限 90 条；只存真正的解读文本 */
+    /** 当日解读入库：按分析口径的数据日期（dataDate）同日覆盖（重跑解读只留最新一条）、升序、上限 90 条；
+     * 只存真正的解读文本。挂 dataDate 而非自然日 */
     function saveAiLog(text) {
-      const date = todayStr();
+      const date = analysis.value?.dataDate || todayStr();
       const t = typeof text === 'string' ? text.trim() : '';
       if (
         !t ||
@@ -3068,6 +3269,10 @@ const app = createApp({
     // ---- ESC 关闭最上层弹窗（输入法合成中不响应，防误关丢表单内容）----
     function onKeydown(e) {
       if (e.key !== 'Escape' || e.isComposing) return;
+      if (msgPanelOpen.value) {
+        msgPanelOpen.value = false;
+        return;
+      } // 消息面板最轻量，最先响应
       if (estimateBoardCode.value) {
         closeEstimateBoard();
         return;
@@ -3094,12 +3299,14 @@ const app = createApp({
       }
     }
     window.addEventListener('keydown', onKeydown);
+    window.addEventListener('pointerdown', onGlobalPointerdownForMsg); // 消息面板点外部关闭
     window.addEventListener('resize', onWindowResize); // 曲线宽随容器走（不用 ResizeObserver，避免弹窗卸载后回调）
     onUnmounted(() => {
       clearInterval(quoteTimer);
       clearInterval(clockTimer);
       stopCurveClock();
       window.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('pointerdown', onGlobalPointerdownForMsg);
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('hashchange', onHashChange); // 路由监听随组件卸载移除
       ocrCleanup?.();
@@ -3130,6 +3337,7 @@ const app = createApp({
       showSnapshotForm,
       snapshotForm,
       submitSnapshot,
+      snapshotSubmitting,
       exportData,
       importData,
       quoteStatus,
@@ -3158,6 +3366,8 @@ const app = createApp({
       profitStateLabel,
       stripDayText,
       stripPrevText,
+      stripMainLabel,
+      stripPrevLabel,
       stripDateLabel,
       stripDayProfit,
       toggleMask: () => {
@@ -3309,10 +3519,13 @@ const app = createApp({
       summaryCollapsed,
       blockOrder,
       visibleOrder,
-      corrPending,
-      corrPendingTitle,
-      principalAudit,
-      jumpAuditTitle,
+      messages,
+      unreadCount,
+      msgReadSigs,
+      msgPanelOpen,
+      msgBellWrapEl,
+      toggleMsgPanel,
+      markAllMsgRead,
       onDragStart,
       onDrop,
       onMoveClick,
@@ -3337,26 +3550,49 @@ const app = createApp({
           <button class="theme-btn" @click="toggleTheme" :title="'主题（当前：' + themeLabel + '，点击切换）'"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2a6 6 0 010 12z" fill="currentColor"/></svg>{{ themeLabel }}</button>
           <button class="theme-btn" @click="cycleUpdown" :title="'涨跌色（当前：' + updownLabel + '，点击切换）'"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>{{ updownLabel }}</button>
           <button class="privacy-btn" @click.stop="toggleMask" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>{{ summaryHidden ? '显示金额' : '隐藏金额' }}</span></button>
+          <!-- 消息中心铃铛（方案 A：三类消息由账本实时派生；已读签名存 localStorage）：视图页签工具区、隐藏金额右侧 -->
+          <div class="msg-bellwrap" ref="msgBellWrapEl">
+            <button
+              type="button"
+              class="msg-bell"
+              :title="unreadCount > 0 ? '消息（' + unreadCount + ' 条未读）' : '消息'"
+              @click="toggleMsgPanel"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+              <span v-if="unreadCount" class="msg-cnt">{{ unreadCount }}</span>
+            </button>
+            <div v-if="msgPanelOpen" class="msg-panel">
+              <div class="msg-panel-head">
+                <span>消息</span>
+                <span class="msg-mark" @click="markAllMsgRead">全部标为已读</span>
+              </div>
+              <div v-if="messages.length === 0" class="msg-empty">暂无消息——一切正常</div>
+              <div
+                v-for="m in messages"
+                :key="m.sig"
+                class="msg-item"
+                :class="['msg-' + m.type, { 'msg-unread': !msgReadSigs.includes(m.sig) }]"
+              >
+                <span class="msg-dot"></span>
+                <span class="msg-txt">{{ m.txt }}<span v-if="!msgReadSigs.includes(m.sig)" class="msg-new">新</span></span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- 首页收益条已移至核心指数监控卡下方（order:3；顶部固定非排序区块） -->
       <div v-if="viewMode === 'board'" class="blocks-wrap" @dragstart="onDragStart" @dragover.prevent @drop.prevent="onDrop" @click="onMoveClick">
-        <!-- 资产总览位于收益页 M1；本金徽标留在首页、置于健康条旁 -->
-        <div v-if="corrPending.length || principalAudit.unexplained.length" class="principal-badges">
-          <span v-if="corrPending.length" class="corr-pending" :title="corrPendingTitle">本金修正待体现 {{ corrPending.length }} 条</span>
-          <span v-if="principalAudit.unexplained.length" class="corr-audit" :title="jumpAuditTitle">本金跳变未留痕 {{ principalAudit.unexplained.length }} 处</span>
-        </div>
         <div v-if="healthStrip" class="health-wrap blk" data-blk="health" :style="{ order: visibleOrder.indexOf('health') + 1 }" v-html="healthStrip"></div>
         <div v-if="indexes.length" class="idxm-wrap blk" data-blk="idx" :style="{ order: visibleOrder.indexOf('idx') + 1 }" :class="{ 'is-collapsed': !indexExpanded }" role="button" tabindex="0" :aria-expanded="String(indexExpanded)" aria-label="核心指数监控，点击折叠或展开" @click="toggleIndexMonitor" @keydown.enter="onIndexHeadKey" @keydown.space="onIndexHeadKey" v-html="indexMonitorHtml"></div>
         <!-- 收益条：置于核心指数监控卡下方（order:3），与各卡片同一间距；👁 与收益页 M1 双入口共用；非点击跳转区块 -->
         <div class="profit-strip" style="order: 3">
           <div class="ps-main">
-            <span class="ps-label">当日收益</span>
+            <span class="ps-label">{{ stripMainLabel }}</span>
             <span class="ps-tag" :class="'ps-' + profitState">{{ profitStateLabel }}</span>
             <b class="ps-num" :style="stripDayProfit != null && !summaryHidden ? { color: profitColor(stripDayProfit) } : {}">{{ stripDayText }}</b>
           </div>
           <div class="ps-sub">
-            <span>昨日 <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
+            <span>{{ stripPrevLabel }} <b :style="!summaryHidden && summary.portfolio?.total?.prevDayProfit != null ? { color: profitColor(summary.portfolio.total.prevDayProfit) } : {}">{{ stripPrevText }}</b></span>
             <span v-if="stripDateLabel" class="ps-date">{{ stripDateLabel }}</span>
             <span class="ps-flex"></span>
             <button type="button" class="icon-btn" :title="summaryHidden ? '显示金额' : '隐藏金额（防窥）'" @click.stop="toggleMask"><svg v-if="summaryHidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="20" x2="20" y2="4"/></svg><svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -3490,7 +3726,8 @@ const app = createApp({
         <div class="analysis-head">
           <b>{{ analysis.dataDate === analysis.today ? '今日行情分析' : '最新行情分析' }}</b>
           <span class="analysis-head-right">
-            <span class="date">{{ analysis.dataDateLabel }} · 规则生成</span>
+            <span class="date">{{ analysis.dataDateLabel }}{{ analysis.genTime ? ' ' + analysis.genTime : '' }} · 规则生成</span>
+            <span v-if="analysis.closed" class="tag-est" title="今天休市，展示最近交易日的数据；节后首个交易日恢复更新">休市中</span>
             <button class="btn-mini" :disabled="aiBusy" @click="runAiAnalysis">{{ aiBusy ? 'AI 解读生成中…' : '✨ AI 解读' }}</button>
           </span>
         </div>
@@ -3869,7 +4106,7 @@ ${STRATEGY_CFG_MODAL}
           <div class="modal-footer">
             <span v-if="snapshotEditing" style="font-size:12px; color:var(--color-muted); margin-right:auto;">保存后策略引擎按新本金即时重算徽章</span>
             <button class="btn-cancel" @click="showSnapshotForm = false">取消</button>
-            <button class="btn-primary" @click="submitSnapshot">保存</button>
+            <button class="btn-primary" @click="submitSnapshot" :disabled="snapshotSubmitting">保存</button>
           </div>
         </div>
       </div>

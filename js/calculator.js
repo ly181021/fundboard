@@ -117,6 +117,8 @@ export function computeDailyProfit(holdShares, changeAmount) {
  * 估值模式：estimate属于今天，且今日确认净值未发布（nav_date !== today）→ 使用估算净值；
  * 确认模式：其余情况（今日净值已发布则优先确认净值）→ 使用相邻确认净值差值。
  * 同步更新市值 holdAmount = 份额 × 最新净值，并重算预警。
+ * holidays：法定节假日日期集合，由js/tradingCalendar.js注入，允许缺省。
+ *  QDII到账判定依据该集合执行顺延，缺省时降级仅跳过周末。
  *
  * 附带输出净值对齐展示字段，用于表格/汇总卡当日、昨日列：
  * dataDate：当日数据归属日期；估值模式为today，否则nav_date，日视图明细以此对齐。
@@ -124,7 +126,7 @@ export function computeDailyProfit(holdShares, changeAmount) {
  * 场外基金净值晚间公布，开盘不可把昨日行情当作当日展示。
  * prevDayProfit：行情是今日 → 昨日变动（prev_nav − prev2_nav）；nav_date为昨天 → 使用该日变动；更早则null。
  */
-export function applyQuote(state, quote, today, name) {
+export function applyQuote(state, quote, today, name, holidays) {
   // QDII（基金名称含 QDII）不使用任何估值源——其估值是第三方自算且滞后失真，
   // 只走确认净值 + 到账口径；国内基金（含天天基金无估值的中欧系等）正常用估值。
   const isQdii = /QDII/i.test(name ?? '');
@@ -167,12 +169,15 @@ export function applyQuote(state, quote, today, name) {
   const prevDayProfitRaw = computeDailyProfit(state.holdShares, prevChange);
   const navToday = estimateMode || quote.nav_date === today;
   const navYesterday = !navToday && quote.nav_date === yesterdayOf(today);
-  // QDII 到账口径（与 js/analysis.js 到账日志的口径 A 同源）：到账日 = 净值日的下一个工作日。
+  // QDII 到账口径（与 js/analysis.js 到账日志的到账日期映射同源）：到账日 = 净值日后第一个工作日（节假日顺延）。
   // 判据不能用"nav_date === 昨天"：QDII 净值 T+1 个交易日公布，周五净值要到周日晚/周一才到账
   // （跨周末差 3 个日历日），按"昨天"判会在周一漏判成"未到账"、当日列误显「待更新」（实测发现）。
   // QDII 新到账当天："当日"列显示新到账的确认收益与它自己净值日的涨幅，昨日列 = 再前一天的变动（到账口径）
   const qdiiLate =
-    isQdii && !navToday && quote.nav_date != null && nextWorkdayOf(quote.nav_date) === today;
+    isQdii &&
+    !navToday &&
+    quote.nav_date != null &&
+    nextWorkdayOf(quote.nav_date, holidays) === today;
 
   return {
     ...state,
@@ -209,17 +214,21 @@ function yesterdayOf(today) {
 }
 
 /**
- * 净值日的下一个工作日（跳周末；本地时区）。到账口径 A 的单一实现：
- * 到账日志（`js/analysis.js bookArrivals`：QDII 到账日 = 净值日下一工作日）与当日/昨日列
+ * 净值日后第一个工作日（跳周末与法定节假日；本地时区）。
+ * 到账日期映射的单一实现：
+ *  到账日志（`js/analysis.js bookArrivals`：QDII 到账日 = 净值日后首个交易日）与当日/昨日列
  * （本文件 applyQuote）共用本函数，两处口径不得各写一份。
- * 法定节假日暂不感知（与存量重建工具同口径，只跳周末）。
+ * holidays：法定节假日日期集合（YYYY-MM-DD，来自 js/tradingCalendar.js），由调用方注入。
+ *  缺省/降级（数据不可得）退化为只跳周末。
  */
-export function nextWorkdayOf(dateStr) {
+export function nextWorkdayOf(dateStr, holidays) {
   const [y, m, d] = String(dateStr).split('-').map(Number);
   const dt = new Date(y, m - 1, d + 1);
-  while (dt.getDay() === 0 || dt.getDay() === 6) dt.setDate(dt.getDate() + 1);
   const p = (n) => String(n).padStart(2, '0');
-  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+  const iso = () => `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+  while (dt.getDay() === 0 || dt.getDay() === 6 || (holidays != null && holidays.has(iso())))
+    dt.setDate(dt.getDate() + 1);
+  return iso();
 }
 
 const DAY_MS = 365 * 24 * 60 * 60 * 1000;

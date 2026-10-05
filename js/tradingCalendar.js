@@ -42,5 +42,14 @@ export function createTradingCalendar({ fetchFn, cache = new Map() } = {}) {
     return !holidays.has(dateStr);
   }
 
-  return { isTradingDay, holidaysOf };
+  /** 若干年份法定节假日日期的并集（YYYY-MM-DD Set）；跨年推进场景由调用方传入相邻年份。按年缓存，重复调用不重复请求。 */
+  async function holidaysOfYears(years) {
+    const set = new Set();
+    for (const y of new Set((years || []).map(Number))) {
+      for (const d of await holidaysOf(y)) set.add(d);
+    }
+    return set;
+  }
+
+  return { isTradingDay, holidaysOf, holidaysOfYears };
 }
