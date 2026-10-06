@@ -1216,6 +1216,8 @@ const app = createApp({
     async function refreshTradingDay() {
       arrivalHolidays.value = await ensureArrivalHolidays();
       const d = todayStr();
+      // 节假日集合就绪即刷新指数开市状态（不等下一轮 60s timer：假期加载页面会先短暂显示"开盘中"）
+      indexStatus.value = marketStatusOf(new Date(), arrivalHolidays.value);
       if (tradingDayCache.date === d) return;
       tradingDayCache.date = d;
       tradingDayCache.ok = await tradingCalendar.isTradingDay(d);
@@ -2721,7 +2723,7 @@ const app = createApp({
       e.preventDefault();
       toggleIndexMonitor();
     }
-    const indexStatus = ref(marketStatusOf(new Date()));
+    const indexStatus = ref(marketStatusOf(new Date(), arrivalHolidays.value));
     // 核心指数「当天迷你分时」：仅在监控展开时请求
     // 折叠态不发请求、不随轮询（缩略图非关键路径）；失败保留上次图形，下一轮自然重试。
     const indexSparks = ref({}); // code → { market, last_pct, spark }
@@ -2758,7 +2760,8 @@ const app = createApp({
             const pctVal = displayChangePct(idx.change_pct, {
               lastSessionPct: sp?.last_pct ?? null,
               useLastSession:
-                marketOfIndex(idx.code) === 'us' && marketPhaseOf(idx.code) === 'closed',
+                marketOfIndex(idx.code) === 'us' &&
+                marketPhaseOf(idx.code, new Date(), arrivalHolidays.value) === 'closed',
             });
             return {
               code: idx.code, // 迷你分时按 code 取槽位数据
@@ -2772,7 +2775,7 @@ const app = createApp({
               chgColor: profitColor(pctVal),
               timeText: formatIndexTime(idx.time),
               open: indexStatus.value[marketOfIndex(idx.code)], // 海外指数白名单映射（marketClock）——老的 A 股/港股两分支不覆盖美股，会错拿 A 股窗口
-              phase: marketPhaseOf(idx.code), // 午间休市 11:30–13:00 不该显示"已收盘"（与上面 open 同源，随 indexStatus 刷新重算）
+              phase: marketPhaseOf(idx.code, new Date(), arrivalHolidays.value), // 午间休市 11:30–13:00 不该显示"已收盘"（与上面 open 同源，随 indexStatus 刷新重算）；节假日集合注入（A股假期不显示"开盘中"）
             };
           }),
         {
@@ -3253,7 +3256,7 @@ const app = createApp({
         if (inQuoteWindow()) loadQuotes();
         refreshTradingDay();
         refreshSourceHealth(); // 随行情轮询周期更新（约 60s）
-        indexStatus.value = marketStatusOf(new Date()); // 开市状态点随时间刷新
+        indexStatus.value = marketStatusOf(new Date(), arrivalHolidays.value); // 开市状态点随时间刷新（节假日集合就绪后 A 股假期判 closed）
         if (overseasIndexWindowOpen(new Date())) loadIndexes(); // 恒生/纳指开市时段：A 股闭市不挡指数刷新
         if (indexExpanded.value) loadIndexSparks(); // 迷你分时随轮询刷新（折叠态静默；服务端 5 分钟子缓存兜底）
         if (estimateBoardCode.value && !curvePollSilent()) loadEstimateCurve(); // 估值盘开着才拉；午休/收盘/非交易日静默
