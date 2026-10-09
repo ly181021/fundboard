@@ -13,6 +13,20 @@
 
 **架构特点**：零构建。前端 Vue3 / Chart.js 走 CDN + 原生 ES Modules；服务端 Node 零第三方依赖（静态托管 + 行情代理 + JSON 文件存储）。行情任何失败都自动降级，离线体验完整保留。
 
+## **系统截图**
+
+### 看板
+
+![看板1](board1.png)
+
+![看板2](img/board2.png)
+
+
+### 收益页
+
+![收益页](img/fund1.png)
+
+
 ## 使用方法
 
 要求：Node.js ≥ 18（[官网下载](https://nodejs.org/)，或用 `nvm`/`fnm` 等版本管理器安装）。
