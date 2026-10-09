@@ -1166,7 +1166,7 @@ const app = createApp({
         `确定删除「${fund.name}（${fund.code}）」？\n将删除快照、全部交易记录，操作不可撤销。调整数据请用「编辑」，删除前可导出备份。`,
       );
       if (!ok) return;
-      // 自动补留痕（口径Ⅰ）：封账——非"修正留痕"跳变逐跳补记录，删除后徽标不再出现；判定失败不阻断删除
+      // 自动补留痕（口径Ⅰ）：封账时非"修正留痕"跳变逐跳补记录，删除后徽标不再出现；判定失败不阻断删除
       let recs = [];
       try {
         recs = correctionsForFundRemoval(
@@ -1216,6 +1216,8 @@ const app = createApp({
     async function refreshTradingDay() {
       arrivalHolidays.value = await ensureArrivalHolidays();
       const d = todayStr();
+      // 节假日集合就绪即刷新指数开市状态（不等下一轮 60s timer：假期加载页面会先短暂显示"开盘中"）
+      indexStatus.value = marketStatusOf(new Date(), arrivalHolidays.value);
       if (tradingDayCache.date === d) return;
       tradingDayCache.date = d;
       tradingDayCache.ok = await tradingCalendar.isTradingDay(d);
@@ -2721,7 +2723,7 @@ const app = createApp({
       e.preventDefault();
       toggleIndexMonitor();
     }
-    const indexStatus = ref(marketStatusOf(new Date()));
+    const indexStatus = ref(marketStatusOf(new Date(), arrivalHolidays.value));
     // 核心指数「当天迷你分时」：仅在监控展开时请求
     // 折叠态不发请求、不随轮询（缩略图非关键路径）；失败保留上次图形，下一轮自然重试。
     const indexSparks = ref({}); // code → { market, last_pct, spark }
@@ -2744,7 +2746,7 @@ const app = createApp({
     // 指数卡展示白名单与顺序：只展示这 4 只、按此顺序。
     // 其余 7 只仍由 `/api/index` 与 `/api/index-spark` 照常取回（留接口备用），只是前端不渲染；
     // 因此后端一行未改；日后要恢复展示，改这一行数组即可。
-    // 注：这 4 只都在 push2 覆盖范围内、新浪备源也都有 ⇒ 主源可用与否都出全 4 张，张数不会跳。
+    // 注：这 4 只都在 push2 覆盖范围内、新浪备源也都有 → 主源可用与否都出全 4 张，张数不会跳。
     const INDEX_CARD_CODES = ['000001', '000688', 'NDX', 'HSI']; // 上证指数 / 科创50 / 纳斯达克100 / 恒生指数
     const indexMonitorHtml = computed(() =>
       indexMonitorCardHtml(
@@ -2758,7 +2760,8 @@ const app = createApp({
             const pctVal = displayChangePct(idx.change_pct, {
               lastSessionPct: sp?.last_pct ?? null,
               useLastSession:
-                marketOfIndex(idx.code) === 'us' && marketPhaseOf(idx.code) === 'closed',
+                marketOfIndex(idx.code) === 'us' &&
+                marketPhaseOf(idx.code, new Date(), arrivalHolidays.value) === 'closed',
             });
             return {
               code: idx.code, // 迷你分时按 code 取槽位数据
@@ -2772,7 +2775,7 @@ const app = createApp({
               chgColor: profitColor(pctVal),
               timeText: formatIndexTime(idx.time),
               open: indexStatus.value[marketOfIndex(idx.code)], // 海外指数白名单映射（marketClock）——老的 A 股/港股两分支不覆盖美股，会错拿 A 股窗口
-              phase: marketPhaseOf(idx.code), // 午间休市 11:30–13:00 不该显示"已收盘"（与上面 open 同源，随 indexStatus 刷新重算）
+              phase: marketPhaseOf(idx.code, new Date(), arrivalHolidays.value), // 午间休市 11:30–13:00 不该显示"已收盘"（与上面 open 同源，随 indexStatus 刷新重算）；节假日集合注入（A股假期不显示"开盘中"）
             };
           }),
         {
@@ -2794,12 +2797,12 @@ const app = createApp({
       auditPrincipalJumps(data.daily, data.corrections, data.assets),
     );
 
-    // ---- 消息中心（方案 A：三类消息由账本实时派生，不落库；已读签名存 localStorage）----
+    // ---- 消息中心 ----
     const messages = computed(() => {
       const nameOf = new Map(data.assets.map((a) => [a.code, a.name]));
       const nameOfCode = (c) => nameOf.get(c) ?? c; // 基金已删除时名称不可考，回退代码
       const list = [];
-      // 黄（需动手）：无交易解释也无修正留痕——仅存量遗留或绕过页面改数据会出现
+      // 黄（需动手）：无交易解释也无修正留痕（仅存量遗留或绕过页面改数据会出现）
       for (const j of principalAudit.value.unexplained) {
         list.push({
           type: 'yellow',
@@ -2875,13 +2878,13 @@ const app = createApp({
         yesterdayProfit: summary.value.totalYesterdayProfit,
       };
       // 分析口径的数据日期：估值模式为今天、确认模式为最新净值日期（QDII 等滞后品种自然靠后）；
-      // 非交易日（周末/法定节假日，交易日历感知）钳制为只取确认净值日——估值模式的"今天"不参与，
+      // 非交易日（周末/法定节假日，交易日历感知）钳制为只取确认净值日，估值模式的"今天"不参与，
       // 否则假期里标题会冒充"今日行情分析"且日期挂在假期日上
       const isClosedToday = tradingDayFlag.value === false;
-      // 候选日期为空（行情缺 nav_date 等残缺形态）时不得兜底成自然日今天——
+      // 候选日期为空（行情缺 nav_date 等残缺形态）时不得兜底成自然日今天：
       // 假期里会冒充"今日行情分析"且日期挂在假期日；诚实做法是不渲染分析卡。
       // max 初始值必须取首个候选（字符串对字符串比较）：null 起比时 '日期' > null 走数值比较
-      // 得 NaN 恒为 false，max 永远停在 null——此前 dataDate 恒为兜底"今天"正是这个根因
+      // 得 NaN 恒为 false，max 永远停在 null——dataDate 恒为兜底"今天"正是这个根因
       const dateCandidates = [];
       for (const f of states) {
         const d = isClosedToday ? f.state.navDate : (f.state.dataDate ?? f.state.navDate);
@@ -3253,7 +3256,7 @@ const app = createApp({
         if (inQuoteWindow()) loadQuotes();
         refreshTradingDay();
         refreshSourceHealth(); // 随行情轮询周期更新（约 60s）
-        indexStatus.value = marketStatusOf(new Date()); // 开市状态点随时间刷新
+        indexStatus.value = marketStatusOf(new Date(), arrivalHolidays.value); // 开市状态点随时间刷新（节假日集合就绪后 A 股假期判 closed）
         if (overseasIndexWindowOpen(new Date())) loadIndexes(); // 恒生/纳指开市时段：A 股闭市不挡指数刷新
         if (indexExpanded.value) loadIndexSparks(); // 迷你分时随轮询刷新（折叠态静默；服务端 5 分钟子缓存兜底）
         if (estimateBoardCode.value && !curvePollSilent()) loadEstimateCurve(); // 估值盘开着才拉；午休/收盘/非交易日静默
@@ -4180,7 +4183,7 @@ ${STRATEGY_CFG_MODAL}
              v-if="analysis" 守卫：analysis 在 quoteStatus≠ok / 无持仓时为 null，
              模板裸解引用会让根组件渲染抛错 → 整页白屏（直链 #/returns 首帧、60s 轮询在途期间必现） -->
         <div v-if="analysis" class="chart-card m-block">
-          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈亏归因' : '最新净值日盈亏归因' }}</b><span class="hint">数据日期：{{ analysis.dataDate === analysis.today ? '当日（最近净值日）' : '最新净值日 ' + (analysis.dataDate || '').slice(5) }}</span><span class="ctl-label">金额排序：</span><button class="seg" :class="{ active: !attrSortDesc }" @click="setAttrSort(false)">升序</button><button class="seg" :class="{ active: attrSortDesc }" @click="setAttrSort(true)">降序</button></div>
+          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈利' : '最新净值日盈利' }}</b><span class="hint">数据日期：{{ (analysis.dataDate || '').slice(5) }}</span><span class="sort-tri" role="group" aria-label="金额排序"><button class="tri tri-up" :class="{ active: !attrSortDesc }" @click="setAttrSort(false)" title="金额升序（最亏在前）" aria-label="金额升序"></button><button class="tri tri-dn" :class="{ active: attrSortDesc }" @click="setAttrSort(true)" title="金额降序（最赚在前）" aria-label="金额降序"></button></span></div>
           <div v-if="analysis.attributionRows.length > 0" class="attr-block">
             <div v-for="row in analysis.attributionRows" :key="row.name" class="attr-row">
               <span class="attr-name">{{ row.name }}</span>
@@ -4188,14 +4191,14 @@ ${STRATEGY_CFG_MODAL}
               <span class="attr-val" :style="summaryHidden ? {} : { color: profitColor(row.dir === 'up' ? 1 : -1) }">{{ maskText(row.signed, summaryHidden) }}</span>
             </div>
           </div>
-          <div v-else class="empty-hint">暂无盈亏归因：等待行情数据到位后自动生成</div>
+          <div v-else class="empty-hint">暂无当日盈利：等待行情数据到位后自动生成</div>
           <div class="metric-tags">
             <span class="metric-tag info">持仓集中度：top1 占 {{ maskText(Math.round(analysis.concentration.top1 * 100) + '%', summaryHidden) }} · top3 占 {{ maskText(Math.round(analysis.concentration.top3 * 100) + '%', summaryHidden) }}</span>
             <span v-if="portfolioXirr != null" class="metric-tag info">组合年化(XIRR) {{ maskText(pctText(portfolioXirr), summaryHidden) }}</span>
           </div>
         </div>
         <div v-else class="chart-card m-block">
-          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈亏归因' : '最新净值日盈亏归因' }}</b><span class="hint">数据日期：—</span></div>
+          <div class="chart-head"><b>{{ analysis.dataDate === analysis.today ? '当日盈利' : '最新净值日盈利' }}</b><span class="hint">数据日期：—</span></div>
           <div class="empty-hint">行情数据加载中或暂无持仓：数据到位后自动生成归因</div>
         </div>
 

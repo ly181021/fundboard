@@ -47,7 +47,10 @@ function deadImports(filePath) {
 }
 
 test('静态守卫：源码目录无死导入（import 了必须至少被用一次）', () => {
-  const files = ['js', 'lib', 'tools', 'tests'].flatMap((d) => walk(join(ROOT, d)));
+  // tools 已移至仓库根（私有目录，不随公开发布出仓），其余源码目录仍在 zfb-benjin 下
+  const files = ['js', 'lib', 'tests']
+    .flatMap((d) => walk(join(ROOT, d)))
+    .concat(walk(join(ROOT, '..', 'tools')));
   assert.ok(files.length > 30, `扫描文件数异常：${files.length}`); // 防路径写错导致"空集通过"
   const offenders = [];
   for (const f of files) {

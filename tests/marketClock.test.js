@@ -170,3 +170,30 @@ test('marketOfIndex × marketStatusOf：映射结果可直接索引三市场状�
   assert.equal(status[marketOfIndex('HSI')], false);
   assert.equal(status[marketOfIndex('000300')], false);
 });
+
+// ---- 法定节假日感知（chinese-days 由调用方注入；2026-10-06 周二＝国庆假期，实证 A 股休市、港股照常）----
+
+const HOLIDAY_NOW = new Date('2026-10-06T02:30:00Z'); // 北京 10-06（周二）10:30，A 股交易时段内
+const CN_HOLIDAYS = new Set(['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07']);
+
+test('cnMarketPhase：假期日在交易时段内 → 注入节假日集合判 closed；缺省退化只跳周末（旧行为）', () => {
+  assert.equal(cnMarketPhase(HOLIDAY_NOW), 'open'); // 无节假日数据：工作日粗判（旧行为兜底）
+  assert.equal(cnMarketPhase(HOLIDAY_NOW, CN_HOLIDAYS), 'closed');
+  assert.equal(cnMarketPhase(HOLIDAY_NOW, ['2026-10-06']), 'closed'); // 数组注入同效
+});
+
+test('marketStatusOf / marketPhaseOf：假期日 A 股 closed；港股不跟内地假期照常 open；美股不受影响', () => {
+  const st = marketStatusOf(HOLIDAY_NOW, CN_HOLIDAYS);
+  const cnItem = st.items.find((i) => i.label === 'A股');
+  const hkItem = st.items.find((i) => i.label === '港股');
+  assert.equal(cnItem.open, false);
+  assert.equal(cnItem.phase, 'closed');
+  assert.equal(hkItem.open, true); // 10-06 港股实证开市（时间戳实时更新），不因内地假期误判休市
+  assert.equal(hkItem.phase, 'open');
+  assert.equal(marketPhaseOf('000300', HOLIDAY_NOW, CN_HOLIDAYS), 'closed');
+  assert.equal(marketPhaseOf('000001', HOLIDAY_NOW, CN_HOLIDAYS), 'closed');
+  // 港股相位忽略内地节假日集合（香港自有历法未建模，行情时间戳兜底）
+  assert.equal(marketPhaseOf('HSI', HOLIDAY_NOW, CN_HOLIDAYS), 'open');
+  // 美股分支不受集合影响（美东 10-05 周一 22:30 = 北京 10-06 10:30，冬令时盘前）
+  assert.equal(marketPhaseOf('NDX', HOLIDAY_NOW, CN_HOLIDAYS), 'closed');
+});
