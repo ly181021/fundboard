@@ -3,7 +3,7 @@
  *
  * 浏览器/服务端同构纯函数。仅做大概率开市近似判断，用于指数轮询分流：
  * 覆盖周末与每日开闭市时段；A 股法定节假日感知（chinese-days 由调用方注入，10-06 国庆实证假期显示"开盘中"缺陷）；
- * 港/美股节假日不感知（各自历法未建模，港股 10-06 实证与内地假期不同步——照常开市）；数据陈旧由行情时间戳（push2 f124）可见。
+ * 港/美股节假日不感知（各自历法未建模，港股不随内地假期休市）；数据陈旧由行情时间戳（push2 f124）可见。
  *
  * 恒生UTC+8，周一至五 9:30–12:00 / 13:00–16:00（午休分流）；
  * 纳指美东周一至五9:30–16:00：夏令时UTC-4，北京时间21:30–次日04:00；冬令时UTC-5，北京时间22:30–次日05:00。
@@ -74,7 +74,7 @@ export function hkIndexWindowOpen(now = new Date()) {
 }
 
 /** A 股阶段（UTC+8）：'open' 9:30–11:30 / 13:00–15:00、'lunch' 11:30–13:00、'closed' 其余/周末。
- * holidays（Set/Array，'YYYY-MM-DD'）：法定节假日集合（chinese-days，调用方注入）——集合内日期判 'closed'
+ * holidays（Set/Array，'YYYY-MM-DD'）：法定节假日集合（chinese-days，调用方注入；集合内日期判 'closed'）
  * （10-06 国庆假期实证 A 股休市而卡片显示"开盘中"）；缺省退化只跳周末（旧行为，交易日历未加载时不误报）。 */
 export function cnMarketPhase(now = new Date(), holidays = null) {
   const { dow, min } = weekdayMinutes(shifted(now, 8));
@@ -124,8 +124,8 @@ export function marketOfIndex(code) {
 }
 
 /** 指数所属市场的交易阶段（'open' | 'lunch' | 'closed'）：卡片上那枚状态点的文案依据。
- * holidays 仅作用于 A 股（chinese-days 注入）；港股不跟内地假期（10-06 实证港股开市而内地休市），
- * 美股假期未建模——两者沿用周末近似，行情时间戳兜底。 */
+ * holidays 仅作用于 A 股（chinese-days 注入）；港股不跟内地假期（内地休市日港股照常开市），
+ * 美股假期未建模，两者沿用周末近似，行情时间戳兜底。 */
 export function marketPhaseOf(code, now = new Date(), holidays = null) {
   const m = marketOfIndex(code);
   if (m === 'us') return usIndexWindowOpen(now) ? 'open' : 'closed'; // 美股无午休
