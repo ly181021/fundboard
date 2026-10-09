@@ -17,7 +17,7 @@
 
 ### 看板
 
-![看板1](board1.png)
+![看板1](img/board1.png)
 
 ![看板2](img/board2.png)
 
