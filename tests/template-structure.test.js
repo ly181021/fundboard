@@ -197,7 +197,9 @@ test('模板引用的根标识符都已在 setup 中暴露（防静默失效：�
   const exprs = [];
   for (const m of tpl.matchAll(/\{\{([\s\S]*?)\}\}/g)) exprs.push(m[1]);
   for (const m of tpl.matchAll(/(?:^|\s):([\w-]+)="([^"]*)"/g)) exprs.push(m[2]);
-  for (const m of tpl.matchAll(/\sv-(?:if|show|else-if)="([^"]*)"/g)) exprs.push(m[1]);
+  // v-html 一并扫描：漏暴露的 computed 在 v-html 下静默渲染空串（v-if/:prop 类还有布尔/属性可察，
+  // v-html 空串与"无数据"观感相同，只能靠守卫拦）
+  for (const m of tpl.matchAll(/\sv-(?:if|show|else-if|html)="([^"]*)"/g)) exprs.push(m[1]);
   for (const m of tpl.matchAll(/\sv-for="([^"]*)"/g)) {
     const mm = m[1].match(/\sin\s([\s\S]+)$/);
     if (mm) exprs.push(mm[1]);
@@ -218,4 +220,21 @@ test('模板引用的根标识符都已在 setup 中暴露（防静默失效：�
     }
   }
   assert.deepEqual([...unknown], [], '模板引用了 setup 未暴露的标识符（会静默取到 undefined）');
+});
+
+test('首页三区块模板 v-if 守卫（隐藏判据必须同时作用于 DOM 渲染，不能只进排序计算）', () => {
+  // 背景：金价区块曾只把判据写进 blockVisible（排序槽位），模板无 v-if——
+  // 本地模式下骨架卡照渲染，且 indexOf('gold')=-1 → order:0 窜到页首。
+  assert.ok(
+    /<div[^>]*v-if="healthStrip"[^>]*data-blk="health"/.test(tpl),
+    'health 区块缺 v-if="healthStrip"',
+  );
+  assert.ok(
+    /<div[^>]*v-if="indexes\.length"[^>]*data-blk="idx"/.test(tpl),
+    'idx 区块缺 v-if="indexes.length"',
+  );
+  assert.ok(
+    /<div[^>]*v-if="storeMode === 'server'"[^>]*data-blk="gold"/.test(tpl),
+    'gold 区块缺 v-if="storeMode === \'server\'"（本地模式不应渲染骨架卡）',
+  );
 });

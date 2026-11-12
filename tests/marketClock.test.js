@@ -14,6 +14,8 @@ import {
   marketPhaseOf,
   beijingToday,
   beijingMinutes,
+  sgePhase,
+  comexGoldPhase,
 } from '../js/marketClock.js';
 
 test('美东夏令时判定：2026 年 3 月第二个周日 07:00Z 起、11 月第一个周日 06:00Z 止', () => {
@@ -196,4 +198,52 @@ test('marketStatusOf / marketPhaseOf：假期日 A 股 closed；港股不跟内�
   assert.equal(marketPhaseOf('HSI', HOLIDAY_NOW, CN_HOLIDAYS), 'open');
   // 美股分支不受集合影响（美东 10-05 周一 22:30 = 北京 10-06 10:30，冬令时盘前）
   assert.equal(marketPhaseOf('NDX', HOLIDAY_NOW, CN_HOLIDAYS), 'closed');
+});
+
+test('sgePhase：日盘/午休/收盘三态（北京周三 2026-11-11 样本，UTC 输入）', () => {
+  const wed = (h, m) => new Date(Date.UTC(2026, 10, 11, h - 8, m));
+  assert.equal(sgePhase(wed(9, 0)), 'open');
+  assert.equal(sgePhase(wed(10, 0)), 'open');
+  assert.equal(sgePhase(wed(11, 29)), 'open');
+  assert.equal(sgePhase(wed(11, 30)), 'lunch'); // 午休 11:30–13:30
+  assert.equal(sgePhase(wed(13, 29)), 'lunch');
+  assert.equal(sgePhase(wed(13, 30)), 'open');
+  assert.equal(sgePhase(wed(15, 29)), 'open');
+  assert.equal(sgePhase(wed(15, 30)), 'closed'); // 日盘 15:30 收（半开区间）
+  assert.equal(sgePhase(wed(17, 0)), 'closed'); // 收盘后至夜盘前的空档
+  assert.equal(sgePhase(wed(20, 0)), 'open'); // 夜盘当日段
+});
+
+test('sgePhase：夜盘跨午夜（凌晨段按前一晚是否有夜盘判定）', () => {
+  const at = (day, h, m) => new Date(Date.UTC(2026, 10, day, h - 8, m));
+  assert.equal(sgePhase(at(10, 2, 29)), 'open'); // 周二凌晨：周一晚夜盘尾
+  assert.equal(sgePhase(at(10, 2, 30)), 'closed'); // 夜盘 2:30 收
+  assert.equal(sgePhase(at(12, 1, 0)), 'open'); // 周四凌晨：周三晚夜盘延续
+  assert.equal(sgePhase(at(14, 1, 0)), 'open'); // 周六凌晨：周五晚夜盘延续
+  assert.equal(sgePhase(at(15, 1, 0)), 'closed'); // 周日凌晨：周六晚无夜盘
+  assert.equal(sgePhase(at(15, 21, 0)), 'closed'); // 周日晚：无夜盘
+  assert.equal(sgePhase(at(14, 10, 0)), 'closed'); // 周六白天休市
+});
+
+test('sgePhase：节假日仅闭日盘（chinese-days 注入；夜盘不感知为已知边界）', () => {
+  const holidays = ['2026-11-11']; // 周三
+  assert.equal(sgePhase(new Date(Date.UTC(2026, 10, 11, 2, 0)), holidays), 'closed'); // 假期日盘休市
+  assert.equal(sgePhase(new Date(Date.UTC(2026, 10, 11, 4, 0)), holidays), 'closed'); // 假期午休段同样 closed
+  assert.equal(sgePhase(new Date(Date.UTC(2026, 10, 11, 13, 0)), holidays), 'open'); // 假期当晚夜盘仍开（近似）
+});
+
+test('comexGoldPhase：Globex 近连续（冬令 ET=北京-13：日常开市/每日维护窗/周末收开）', () => {
+  const bj = (day, h, m) => new Date(Date.UTC(2026, 10, day, h - 8, m)); // 2026-11 冬令
+  assert.equal(comexGoldPhase(bj(11, 18, 50)), 'open'); // 周三白天常态开市
+  assert.equal(comexGoldPhase(bj(11, 7, 30)), 'open'); // 北京清晨＝美东前夜 18:30（Globex 日开）
+  assert.equal(comexGoldPhase(bj(11, 6, 30)), 'closed'); // 北京 06:30＝美东 17:30 每日维护窗
+  assert.equal(comexGoldPhase(bj(11, 5, 59)), 'open'); // 维护窗前一分钟
+  assert.equal(comexGoldPhase(bj(14, 4, 59)), 'open'); // 北京周六凌晨＝美东周五 15:59 尾盘
+  assert.equal(comexGoldPhase(bj(14, 6, 1)), 'closed'); // 北京周六晨＝美东周五 17:01 已收市
+  assert.equal(comexGoldPhase(bj(15, 15, 0)), 'closed'); // 北京周日下午＝美东周日 02:00 休市
+  assert.equal(comexGoldPhase(bj(16, 9, 1)), 'open'); // 北京周一 09:01＝美东周日 20:01（周日 18:00 已开市）
+  // 夏令时抽查（2026-07，ET=北京-12）：维护窗与开市整体前移一小时
+  const jul = (day, h, m) => new Date(Date.UTC(2026, 6, day, h - 8, m));
+  assert.equal(comexGoldPhase(jul(15, 6, 30)), 'open'); // 北京 06:30＝美东前日 18:30
+  assert.equal(comexGoldPhase(jul(15, 5, 30)), 'closed'); // 北京 05:30＝美东 17:30 维护窗
 });

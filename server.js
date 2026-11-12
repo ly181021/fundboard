@@ -403,6 +403,37 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, payload);
   }
 
+  // ---- 金价（金价监控卡：上金所 Au99.99 ＋ 国际金价；只读、公开行情，不鉴权）----
+  // 契约：200 + {goldSge:{...}, goldIntl:{...}, fetched_at}——两卡独立失败域，单卡失败该项为 null、
+  //   整体仍 200（前端保留上次值并转降级态黄条）；两卡均失败 → 502 gold_failed + 负向缓存 30 秒。
+  //   成功缓存 5 分钟（与指数同口径：卡片参照性质，分钟级延迟无感）；
+  //   缓存命中含负缓存（__status），上游故障期重试频率被压住。
+  if (url.pathname === '/api/gold') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'method_not_allowed' });
+    const hit = apiCache.get('goldSge');
+    if (hit) return sendJson(res, hit.__status || 200, hit.__status ? hit.body : hit);
+    const [goldRes, intlRes] = await Promise.allSettled([
+      datasource.fetchGoldSgePrice(),
+      datasource.fetchIntlGoldPrice(),
+    ]);
+    const goldSge = goldRes.status === 'fulfilled' ? goldRes.value : null;
+    const goldIntl = intlRes.status === 'fulfilled' ? intlRes.value : null;
+    if (!goldSge && !goldIntl) {
+      const detail = [goldRes.reason, intlRes.reason]
+        .filter(Boolean)
+        .map((e) => String(e?.message || e))
+        .join(' | ')
+        .replace(/\s+/g, ' ')
+        .slice(0, 60);
+      const body = { error: 'gold_failed', detail };
+      apiCache.set('goldSge', { __status: 502, body }, 30 * 1000);
+      return sendJson(res, 502, body);
+    }
+    const payload = { goldSge, goldIntl, fetched_at: new Date().toISOString() };
+    apiCache.set('goldSge', payload, 5 * 60 * 1000);
+    return sendJson(res, 200, payload);
+  }
+
   // ---- 核心指数「当天迷你分时」（批量 11 只；只读、公开行情，不鉴权）----
   // 契约：200 + items[]（单只失败落成该项 spark:null + empty_reason，不拖垮整批）；
   //   三个市场全失败 → 502 spark_failed（前端保留上次图形）。缓存/单飞/时段判据见上方常量区。

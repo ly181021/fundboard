@@ -19,6 +19,8 @@ import {
   thinBySegment,
   sparkCoversSession,
   clampIndexTimes,
+  parseSinaGold,
+  parseSinaXau,
 } from '../../lib/quotes.js';
 
 test('parseFundgz：解析 JSONP 文本为对象', () => {
@@ -746,4 +748,42 @@ test('clampIndexTimes：沪市盘后滚动时间戳钳回收盘时刻（深市/�
   assert.equal(out[5].time, bj(4, 0, 0), '美股不钳');
   assert.equal(out[6].time, null);
   assert.deepEqual(clampIndexTimes(null), []);
+});
+
+test('parseSinaGold：解析 SGE_AU9999 实测样本（现价/昨收互验涨跌幅，时间按 +08:00）', () => {
+  const text =
+    'var hq_str_SGE_AU9999="AU9999,沪金99,Au99.99,873.00,870.19,883.42,876.00,878.60,862.05,883.00,873.00,873.45,21.00,1000.00,411012.00,357658944000.00,2026-11-11 15:29:58,-1.13%";';
+  const g = parseSinaGold(text);
+  assert.equal(g.code, 'AU9999');
+  assert.equal(g.name, '上金所 Au99.99');
+  assert.equal(g.price, 873.45);
+  assert.ok(Math.abs(g.change_pct - -1.1287) < 0.001, '涨跌幅由现价昨收补算'); // 与源侧 -1.13% 互验
+  assert.equal(g.change_amt, -9.97);
+  assert.equal(g.time, 1794382198); // 2026-11-11 15:29:58 +08:00（秒）
+});
+
+test('parseSinaGold：空内容/字段不足/无变量/非字符串 → null', () => {
+  assert.equal(parseSinaGold('var hq_str_SGE_AU9999="";'), null);
+  assert.equal(parseSinaGold('var hq_str_SGE_AU9999="AU9999,沪金99";'), null); // 现价/昨收位缺值
+  assert.equal(parseSinaGold(''), null);
+  assert.equal(parseSinaGold(null), null);
+});
+
+test('parseSinaXau：解析 hf_XAU 伦敦金现实测样本（最新/昨收补算涨跌幅，时间按 +08:00）', () => {
+  const text =
+    'var hq_str_hf_XAU="4050.91,4032.730,4050.91,4051.26,4066.87,4026.55,18:51:00,4032.73,4035.41,0,0,0,2026-11-11,伦敦金（现货黄金）";';
+  const g = parseSinaXau(text);
+  assert.equal(g.code, 'GC00Y');
+  assert.equal(g.name, '国际金价');
+  assert.equal(g.price, 4050.91);
+  assert.ok(Math.abs(g.change_pct - 0.4508) < 0.001); // (4050.91−4032.73)/4032.73
+  assert.equal(g.change_amt, 18.18);
+  assert.equal(g.time, 1794394260); // 2026-11-11 18:51:00 +08:00（秒）
+});
+
+test('parseSinaXau：空内容/缺价/无变量/非字符串 → null', () => {
+  assert.equal(parseSinaXau('var hq_str_hf_XAU="";'), null);
+  assert.equal(parseSinaXau('var hq_str_hf_XAU=",4032.73";'), null); // 最新价缺值
+  assert.equal(parseSinaXau(''), null);
+  assert.equal(parseSinaXau(null), null);
 });

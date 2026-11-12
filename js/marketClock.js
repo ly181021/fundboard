@@ -7,6 +7,9 @@
  *
  * 恒生UTC+8，周一至五 9:30–12:00 / 13:00–16:00（午休分流）；
  * 纳指美东周一至五9:30–16:00：夏令时UTC-4，北京时间21:30–次日04:00；冬令时UTC-5，北京时间22:30–次日05:00。
+ * 上金所Au99.99（UTC+8）周一至五：日盘9:00–11:30 / 13:30–15:30（午休分流）、夜盘20:00–次日2:30（跨午夜）。
+ * COMEX黄金（国际金价卡）：Globex 周日18:00 ET开市→周五17:00 ET收市，每日17:00–18:00 ET维护窗休市；
+ * 美东节假日不感知（与美股指数同款处理，历法未建模），由行情时间戳兜底。
  * DST遵循2007起美国规则，UTC精确表达：
  * 3月第二个周日07:00Z开启，11月第一个周日06:00Z结束；
  * 切换发生在美东周日凌晨休市时段，不影响开市判定。
@@ -33,10 +36,11 @@ function shifted(now, offsetHours) {
   return new Date(now.getTime() + offsetHours * HOUR_MS);
 }
 
-function weekdayMinutes(shiftedDate) {
+/** 平移后时钟的星期与当日分钟：dayOfWeek＝星期（0=周日…6=周六）；minutesOfDay＝当日分钟数 0..1439（时×60＋分） */
+function weekdayAndMinutes(shiftedDate) {
   return {
-    dow: shiftedDate.getUTCDay(),
-    min: shiftedDate.getUTCHours() * 60 + shiftedDate.getUTCMinutes(),
+    dayOfWeek: shiftedDate.getUTCDay(),
+    minutesOfDay: shiftedDate.getUTCHours() * 60 + shiftedDate.getUTCMinutes(),
   };
 }
 
@@ -53,7 +57,7 @@ export function beijingToday(now = new Date()) {
 
 /** 北京墙钟的当日分钟数（0..1439）：盘前 / 午休 / 收盘判定用；同样与运行时时区无关。 */
 export function beijingMinutes(now = new Date()) {
-  return weekdayMinutes(shifted(now, 8)).min;
+  return weekdayAndMinutes(shifted(now, 8)).minutesOfDay;
 }
 
 /**
@@ -61,10 +65,11 @@ export function beijingMinutes(now = new Date()) {
  * lunch 态：午休期间确实"未开市"，但不是收盘，界面不该显示"已收盘"。
  */
 export function hkMarketPhase(now = new Date()) {
-  const { dow, min } = weekdayMinutes(shifted(now, 8));
-  if (dow === 0 || dow === 6) return 'closed';
-  if ((min >= 570 && min < 720) || (min >= 780 && min < 960)) return 'open';
-  if (min >= 720 && min < 780) return 'lunch';
+  const { dayOfWeek, minutesOfDay } = weekdayAndMinutes(shifted(now, 8));
+  if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+  if ((minutesOfDay >= 570 && minutesOfDay < 720) || (minutesOfDay >= 780 && minutesOfDay < 960))
+    return 'open';
+  if (minutesOfDay >= 720 && minutesOfDay < 780) return 'lunch';
   return 'closed';
 }
 
@@ -77,11 +82,12 @@ export function hkIndexWindowOpen(now = new Date()) {
  * holidays（Set/Array，'YYYY-MM-DD'）：法定节假日集合（chinese-days，调用方注入；集合内日期判 'closed'）
  * （10-06 国庆假期实证 A 股休市而卡片显示"开盘中"）；缺省退化只跳周末（旧行为，交易日历未加载时不误报）。 */
 export function cnMarketPhase(now = new Date(), holidays = null) {
-  const { dow, min } = weekdayMinutes(shifted(now, 8));
-  if (dow === 0 || dow === 6) return 'closed';
+  const { dayOfWeek, minutesOfDay } = weekdayAndMinutes(shifted(now, 8));
+  if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
   if (dayInHolidays(holidays, beijingToday(now))) return 'closed';
-  if ((min >= 570 && min < 690) || (min >= 780 && min < 900)) return 'open';
-  if (min >= 690 && min < 780) return 'lunch';
+  if ((minutesOfDay >= 570 && minutesOfDay < 690) || (minutesOfDay >= 780 && minutesOfDay < 900))
+    return 'open';
+  if (minutesOfDay >= 690 && minutesOfDay < 780) return 'lunch';
   return 'closed';
 }
 
@@ -97,12 +103,51 @@ export function cnIndexWindowOpen(now = new Date()) {
   return cnMarketPhase(now) === 'open';
 }
 
+/**
+ * 上金所阶段（UTC+8，金价监控卡）：'open' 日盘与夜盘、'lunch' 午间休市、'closed' 其余/周末。
+ * 日盘 9:00–11:30、13:30–15:30（午休 11:30–13:30）；夜盘 20:00–次日 2:30，跨午夜归前一晚，
+ * 凌晨段（0:00–2:30）按前一自然日是否周一至五判定：周五夜盘延伸至周六凌晨、周日与周一凌晨无夜盘。
+ * 状态粒度与指数区一致（三态），日盘与夜盘同显"开市"，不区分场次。
+ * holidays（'YYYY-MM-DD' 集合，chinese-days 注入）仅闭日盘；夜盘不感知节假日
+ * （上金所节假日前后另有交易时间表 B，本函数不建模，影响仅状态点文案，金额与时间戳不受影响）。
+ */
+export function sgePhase(now = new Date(), holidays = null) {
+  const { dayOfWeek, minutesOfDay } = weekdayAndMinutes(shifted(now, 8));
+  if (minutesOfDay < 150) {
+    return dayOfWeek >= 2 && dayOfWeek <= 6 ? 'open' : 'closed'; // 凌晨夜盘尾：周二至周六凌晨沿用前一晚夜盘
+  }
+  if (minutesOfDay >= 1200) {
+    return dayOfWeek >= 1 && dayOfWeek <= 5 ? 'open' : 'closed'; // 夜盘当日段 20:00–24:00：周末无夜盘，节假日不感知
+  }
+  if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+  if (dayInHolidays(holidays, beijingToday(now))) return 'closed';
+  if ((minutesOfDay >= 540 && minutesOfDay < 690) || (minutesOfDay >= 810 && minutesOfDay < 930))
+    return 'open';
+  if (minutesOfDay >= 690 && minutesOfDay < 810) return 'lunch';
+  return 'closed';
+}
+
+/**
+ * COMEX 黄金（国际金价卡）阶段：'open' | 'closed'——Globex 近连续交易，无午休概念。
+ * 周期＝周日 18:00 ET 开市 → 周五 17:00 ET 收市；每日 17:00–18:00 ET 维护窗休市。
+ * 美东节假日（感恩节/圣诞等早收或休市）不感知，由行情时间戳兜底"数据陈旧"可见。
+ */
+export function comexGoldPhase(now = new Date()) {
+  const offset = isUsEasternDst(now) ? -4 : -5;
+  const { dayOfWeek, minutesOfDay } = weekdayAndMinutes(shifted(now, offset));
+  if (dayOfWeek === 6) return 'closed'; // 周六全天（周五 17:00 ET 已收市）
+  if (dayOfWeek === 0 && minutesOfDay < 1080) return 'closed'; // 周日 18:00 ET 开市前
+  if (dayOfWeek === 5 && minutesOfDay >= 1020) return 'closed'; // 周五 17:00 ET 收市进入周末（含其后全部时段）
+  if (minutesOfDay >= 1020 && minutesOfDay < 1080) return 'closed'; // 每日维护窗 17:00–18:00 ET
+  return 'open';
+}
+
 /** 纳斯达克（美东）大概率开市：周一至五 9:30–16:00，自动切换夏令时 */
 export function usIndexWindowOpen(now = new Date()) {
   const offset = isUsEasternDst(now) ? -4 : -5;
-  const { dow, min } = weekdayMinutes(shifted(now, offset));
-  if (dow === 0 || dow === 6) return false;
-  return min >= 570 && min < 960;
+  const { dayOfWeek, minutesOfDay } = weekdayAndMinutes(shifted(now, offset));
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+  return minutesOfDay >= 570 && minutesOfDay < 960;
 }
 
 /** 任一海外市场开市（指数轮询分流用；A 股窗口沿用 inQuoteWindow + tradingCalendar） */
