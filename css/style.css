@@ -754,6 +754,93 @@ html[data-theme="dark"] .fund-table .ant-table-content::-webkit-scrollbar-thumb:
   .returns-page .m-cell, .returns-page .week-col, .returns-page .ym-cell { transition: none; }
   .returns-page .m-cell:hover, .returns-page .week-col:hover, .returns-page .ym-cell:hover { transform: none; }
 }
+/* ---- 黄金区块（上金所 Au99.99 ＋ 国际金价卡；与 .idxm 同令牌的独立块，可折叠） ---- */
+.goldm-wrap { margin-bottom: 16px; cursor: pointer; user-select: none; }
+.goldm {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+}
+.goldm-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-width: 0; }
+.goldm-title { font-size: var(--fs-base); font-weight: 600; white-space: nowrap; }
+.goldm-status { display: flex; gap: 10px; font-size: var(--fs-sm); color: var(--color-muted); white-space: nowrap; }
+/* 收起/展开按钮与折叠动画：与 .idxm-btn/.idxm-body 同款（双文案 span ＋ .is-collapsed 由 CSS 切换） */
+.goldm-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: var(--fs-sm);
+  color: var(--color-muted);
+}
+.goldm-btn .t-open { display: none; }
+.goldm-wrap:not(.is-collapsed) .goldm-btn .t-open { display: inline; }
+.goldm-wrap:not(.is-collapsed) .goldm-btn .t-closed { display: none; }
+.goldm-chev { display: inline-block; font-size: 10px; transition: transform .3s ease; }
+.goldm-wrap:not(.is-collapsed) .goldm-chev { transform: rotate(180deg); }
+.goldm-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .3s ease; }
+.goldm-wrap.is-collapsed .goldm-body { grid-template-rows: 0fr; }
+.goldm-clip { overflow: hidden; min-height: 0; }
+/* 网格列数随卡数自适应撑满（is-2/is-3/is-4 由 goldCard 按实际卡数写入） */
+.goldm-grid { padding: 2px 16px 16px; display: grid; gap: 12px; }
+.goldm-grid.is-2 { grid-template-columns: repeat(2, 1fr); }
+.goldm-grid.is-3 { grid-template-columns: repeat(3, 1fr); }
+.goldm-grid.is-4 { grid-template-columns: repeat(4, 1fr); }
+.goldm-card {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg-soft);
+  min-width: 0;
+}
+.goldm-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.goldm-name {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.goldm-name .idxm-dot { margin-left: 6px; }
+.goldm-time { font-size: var(--fs-xs); color: var(--color-muted); white-space: nowrap; }
+.goldm-main { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 3px; }
+.goldm-price { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+.goldm-price .unit { font-size: var(--fs-sm); font-weight: 400; color: var(--color-muted); margin-left: 5px; }
+/* 降级黄条：主备源均失败时保留最近成功价并提示，恢复后随轮询自动刷新 */
+.goldm-degraded {
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+/* 骨架屏（金价卡加载态）：宽度对齐价格与胶囊的实际宽度，高度与值卡一致避免数据到达时跳动 */
+.sk {
+  background: linear-gradient(90deg, var(--color-badge-bg) 25%, var(--color-border) 50%, var(--color-badge-bg) 75%);
+  background-size: 200% 100%;
+  animation: sk 1.2s infinite;
+  border-radius: 6px;
+}
+@keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.sk-price { width: 110px; height: 26px; }
+.sk-pill { width: 92px; height: 18px; border-radius: 999px; }
+@media (max-width: 1023px) {
+  .goldm-grid.is-2, .goldm-grid.is-3, .goldm-grid.is-4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 639px) {
+  .goldm-grid.is-2, .goldm-grid.is-3, .goldm-grid.is-4 { grid-template-columns: 1fr; }
+  .goldm-status { display: none; }
+}
+/* reduced-motion 关停必须写在 goldm/.sk 基础规则之后：同特异性时源序后者胜，
+   前置声明会被后面的基础 transition/animation 覆盖（.idxm 系正常，正因其基础规则在该媒体查询之前） */
+@media (prefers-reduced-motion: reduce) {
+  .goldm-body, .goldm-chev { transition: none; }
+  .sk { animation: none; }
+}
 /* ---- 截图识别录入 ---- */
 .ocr-block { border-top: 1px dashed var(--color-border); margin-top: 16px; padding-top: 12px; }
 .ocr-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

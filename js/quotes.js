@@ -94,5 +94,21 @@ export function createQuoteService({
         return { indexes: [] };
       }
     },
+
+    /**
+     * 金价（金价监控卡：上金所 Au99.99 ＋ 国际金价）。两卡独立失败域：
+     * 单卡源失败该项为 null（调用方保留最近成功值并转降级态）；整体失败（双源皆败）
+     * 两项皆为 null，不抛错。
+     */
+    async fetchGold() {
+      try {
+        const res = await f(`${baseUrl}/api/gold`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = await res.json();
+        return { goldSge: payload?.goldSge ?? null, goldIntl: payload?.goldIntl ?? null };
+      } catch {
+        return { goldSge: null, goldIntl: null };
+      }
+    },
   };
 }

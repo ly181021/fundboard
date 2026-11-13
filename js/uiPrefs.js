@@ -62,11 +62,11 @@ export function saveMsgReadSigs(storage, sigs) {
 }
 
 /**
- * 首页区块 key（顺序即默认顺序：数据源健康条 → 核心指数）。
- * 'summary'（资产总览）已迁入收益页 M1 并退役——旧存储含 summary 时由
- * parseBlockOrder 白名单过滤保序（仅当过滤后键数不足才整体回退默认）。
+ * 首页区块 key（顺序即默认顺序：数据源健康条 → 核心指数 → 黄金）。
+ * 'summary'（资产总览）已迁入收益页 M1 并退役——旧存储含 summary 时由 parseBlockOrder
+ * 白名单过滤保序；存储缺当前任一键（含 summary 键数不足）整体回退默认序，无需迁移。
  */
-export const BLOCK_KEYS = ['health', 'idx'];
+export const BLOCK_KEYS = ['health', 'idx', 'gold'];
 
 /** 默认顺序（与 BLOCK_KEYS 同序副本，防外部改写） */
 export const DEFAULT_BLOCK_ORDER = BLOCK_KEYS.slice();

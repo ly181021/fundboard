@@ -84,22 +84,26 @@ test('uiPrefs U4：parseBlockOrder——缺省回默认；非法形态一律回�
   assert.deepEqual(parseBlockOrder('not json'), DEFAULT_BLOCK_ORDER); // 解析失败
 });
 
-// U4b 旧存顺序兼容：summary 在白名单中被丢弃、剩余键保序（只有键数不足才整体回退）
+// U4b 旧存顺序兼容：summary 在白名单中被丢弃；新增区块键后旧两键顺序键数不足，整体回退默认
 test('uiPrefs U4b：parseBlockOrder——旧顺序含已退役 summary → 白名单过滤保序', () => {
-  assert.deepEqual(parseBlockOrder('["health","summary","idx"]'), ['health', 'idx']);
-  assert.deepEqual(parseBlockOrder('["idx","summary","health"]'), ['idx', 'health']); // 用户自定义顺序保留，不回退默认
-  assert.deepEqual(parseBlockOrder('["health","idx"]'), ['health', 'idx']);
+  // 新增 gold 后：旧两键顺序（无论是否含 summary）键数不足，整体回退默认序
+  assert.deepEqual(parseBlockOrder('["health","summary","idx"]'), DEFAULT_BLOCK_ORDER);
+  assert.deepEqual(parseBlockOrder('["idx","summary","health"]'), DEFAULT_BLOCK_ORDER);
+  assert.deepEqual(parseBlockOrder('["health","idx"]'), DEFAULT_BLOCK_ORDER);
+  // 含全部三键的用户自定义顺序保留（summary 仍被丢弃），不回退默认
+  assert.deepEqual(parseBlockOrder('["gold","summary","idx","health"]'), ['gold', 'idx', 'health']);
 });
 
 // parseBlockOrder 数组入参透传（兼容路径）
 test('uiPrefs U5：parseBlockOrder——数组入参直接透传（不二次 JSON.parse）', () => {
-  assert.deepEqual(parseBlockOrder(['idx', 'health']), ['idx', 'health']);
+  assert.deepEqual(parseBlockOrder(['idx', 'health', 'gold']), ['idx', 'health', 'gold']);
+  assert.deepEqual(parseBlockOrder(['idx', 'health']), DEFAULT_BLOCK_ORDER); // 键数不足 → 回退
   assert.deepEqual(parseBlockOrder(['summary', 'idx']), DEFAULT_BLOCK_ORDER); // 过滤后仅 idx → 键数不足 → 回退
 });
 
 // serialize roundtrip
 test('uiPrefs U6：serializeBlockOrder 与 parseBlockOrder 互逆', () => {
-  const order = ['idx', 'health'];
+  const order = ['idx', 'health', 'gold'];
   const raw = serializeBlockOrder(order);
   assert.equal(typeof raw, 'string');
   assert.deepEqual(parseBlockOrder(raw), order);
@@ -107,8 +111,12 @@ test('uiPrefs U6：serializeBlockOrder 与 parseBlockOrder 互逆', () => {
 
 // loadBlockOrder/saveBlockOrder 对称 + 异常回退
 test('uiPrefs U7：loadBlockOrder——合法存储读出、非法/异常回退默认；saveBlockOrder 落 JSON', () => {
-  const s = mockStorage({ 'ui-block-order': '["idx","health"]' });
-  assert.deepEqual(loadBlockOrder(s), ['idx', 'health']);
+  const s = mockStorage({ 'ui-block-order': '["idx","health","gold"]' });
+  assert.deepEqual(loadBlockOrder(s), ['idx', 'health', 'gold']);
+  assert.deepEqual(
+    loadBlockOrder(mockStorage({ 'ui-block-order': '["idx","health"]' })),
+    DEFAULT_BLOCK_ORDER,
+  ); // 旧两键存储回退默认
   assert.deepEqual(loadBlockOrder(mockStorage()), DEFAULT_BLOCK_ORDER);
   assert.deepEqual(
     loadBlockOrder(mockStorage({ 'ui-block-order': '["summary"]' })),
@@ -123,8 +131,8 @@ test('uiPrefs U7：loadBlockOrder——合法存储读出、非法/异常回退�
     DEFAULT_BLOCK_ORDER,
   );
   const s2 = mockStorage();
-  saveBlockOrder(s2, 'ui-block-order', ['idx', 'health']);
-  assert.deepEqual(parseBlockOrder(s2.data['ui-block-order']), ['idx', 'health']);
+  saveBlockOrder(s2, 'ui-block-order', ['idx', 'health', 'gold']);
+  assert.deepEqual(parseBlockOrder(s2.data['ui-block-order']), ['idx', 'health', 'gold']);
   saveBlockOrder(
     {
       setItem() {
@@ -145,10 +153,10 @@ test("uiPrefs U8：maskText——隐藏恒 '••••••'、显示透传�
   assert.equal(maskText(0, false), '0');
 });
 
-// 附：BLOCK_KEYS 与默认顺序一致性（summary 退役 → 两键）
-test('uiPrefs 附：BLOCK_KEYS 两键（health→idx）、DEFAULT_BLOCK_ORDER 同序', () => {
-  assert.deepEqual(BLOCK_KEYS, ['health', 'idx']);
-  assert.deepEqual(DEFAULT_BLOCK_ORDER, ['health', 'idx']);
+// 附：BLOCK_KEYS 与默认顺序一致性（summary 退役、gold 新增 → 三键）
+test('uiPrefs 附：BLOCK_KEYS 三键（health→idx→gold）、DEFAULT_BLOCK_ORDER 同序', () => {
+  assert.deepEqual(BLOCK_KEYS, ['health', 'idx', 'gold']);
+  assert.deepEqual(DEFAULT_BLOCK_ORDER, ['health', 'idx', 'gold']);
   assert.deepEqual(SUMMARY_BOOL_KEYS, {
     hidden: 'ui-summary-hidden',
     collapsed: 'ui-summary-collapsed',

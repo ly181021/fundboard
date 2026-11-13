@@ -1125,3 +1125,135 @@ test('fetchIndexes：push2 连续失败 → 暂停时长递进并封顶（限制
     .pop();
   assert.equal(Number(after[2].message.match(/暂停自动重试 (\d+) 分钟/)[1]), 15);
 });
+
+// ---- 上金所 Au99.99 金价 ----
+const SINA_GOLD =
+  'var hq_str_SGE_AU9999="AU9999,沪金99,Au99.99,873.00,870.19,883.42,876.00,878.60,862.05,883.00,873.00,873.45,21.00,1000.00,411012.00,357658944000.00,2026-11-11 15:29:58,-1.13%";';
+
+test('fetchGoldSgePrice：主源 push2 解析（名称固定为展示标准名，防备源降级名称跳变）', async () => {
+  const PUSH2 = JSON.stringify({
+    data: {
+      diff: [
+        { f12: 'AU9999', f14: '黄金9999', f2: 872.98, f3: -1.18, f4: -10.44, f124: 1794383100 },
+      ],
+    },
+  });
+  const ds = createDatasource({ fetchFn: fakeFetch([['push2.eastmoney.com', PUSH2]]) });
+  const g = await ds.fetchGoldSgePrice();
+  assert.equal(g.price, 872.98);
+  assert.equal(g.name, '上金所 Au99.99');
+  assert.equal(g.change_pct, -1.18);
+  assert.equal(g.change_amt, -10.44);
+  assert.equal(g.time, 1794383100);
+  assert.equal(g.source, 'push2');
+});
+
+test('fetchGoldSgePrice：主源失败降级新浪备源（GBK + Referer），备源解析同构', async () => {
+  const log = [];
+  const ds = createDatasource({
+    fetchFn: fakeFetch(
+      [
+        ['push2.eastmoney.com', '<html>bad</html>', 500],
+        ['hq.sinajs.cn', SINA_GOLD],
+      ],
+      log,
+    ),
+  });
+  const g = await ds.fetchGoldSgePrice();
+  assert.equal(g.price, 873.45);
+  assert.equal(g.source, 'sina');
+  const sinaCall = log.find((x) => x.url.includes('hq.sinajs.cn'));
+  assert.equal(sinaCall.headers.Referer, 'https://finance.sina.com.cn/');
+});
+
+test('fetchGoldSgePrice：双源失败抛错并埋点 goldSge 失败（路由层负缓存）', async () => {
+  const rec = [];
+  const ds = createDatasource({
+    fetchFn: fakeFetch([]),
+    recordSource: (k, ok) => rec.push([k, ok]),
+  });
+  await assert.rejects(() => ds.fetchGoldSgePrice());
+  assert.deepEqual(
+    rec.filter(([k]) => k === 'goldSge'),
+    [['goldSge', false]],
+  );
+});
+
+test('fetchGoldSgePrice：主源连续失败 3 次进入冷却，期间直走备源不再打扰 push2', async () => {
+  const log = [];
+  // push2 无路由 → 404 失败
+  const ds = createDatasource({ fetchFn: fakeFetch([['hq.sinajs.cn', SINA_GOLD]], log) });
+  for (let i = 0; i < 4; i++) await ds.fetchGoldSgePrice();
+  const push2Calls = log.filter((x) => x.url.includes('push2.eastmoney.com')).length;
+  assert.equal(push2Calls, 3); // 第 4 次在冷却期内，不触主源
+});
+
+// ---- 国际金价（主源 hf_XAU 伦敦金现，备源东财 COMEX 黄金主力连续）----
+const SINA_XAU =
+  'var hq_str_hf_XAU="4050.91,4032.730,4050.91,4051.26,4066.87,4026.55,18:51:00,4032.73,4035.41,0,0,0,2026-11-11,伦敦金（现货黄金）";';
+const PUSH2_INTL = JSON.stringify({
+  data: {
+    diff: [{ f12: 'GC00Y', f14: 'COMEX黄金', f2: 4056.1, f3: 0.64, f4: 25.9, f124: 1794393698 }],
+  },
+});
+
+test('fetchIntlGoldPrice：主源新浪 hf_XAU 解析（伦敦金现分钟级新鲜，名称固定）', async () => {
+  const ds = createDatasource({ fetchFn: fakeFetch([['hq.sinajs.cn', SINA_XAU]]) });
+  const g = await ds.fetchIntlGoldPrice();
+  assert.equal(g.price, 4050.91);
+  assert.equal(g.name, '国际金价');
+  assert.equal(g.change_amt, 18.18);
+  assert.equal(g.source, 'sina');
+});
+
+test('fetchIntlGoldPrice：主源失败降级东财 GC00Y（备源约 10 分钟延迟）；双源失败抛错并埋点 goldIntl', async () => {
+  const ok = createDatasource({
+    fetchFn: fakeFetch([
+      ['hq.sinajs.cn', 'x', 500],
+      ['101.GC00Y', PUSH2_INTL],
+    ]),
+  });
+  const g = await ok.fetchIntlGoldPrice();
+  assert.equal(g.price, 4056.1);
+  assert.equal(g.source, 'push2');
+  const rec = [];
+  const bad = createDatasource({
+    fetchFn: fakeFetch([]),
+    recordSource: (k, o) => rec.push([k, o]),
+  });
+  await assert.rejects(() => bad.fetchIntlGoldPrice());
+  assert.deepEqual(
+    rec.filter(([k]) => k === 'goldIntl'),
+    [['goldIntl', false]],
+  );
+});
+
+test('fetchIntlGoldPrice：与上金所源失败域隔离（上金所主备全挂，国际金价主源照常）', async () => {
+  // 上金所 secid 路由 500、新浪返回 SGE 变量不匹配 → fetchGoldSgePrice 双源失败抛错；hf_XAU 路由正常
+  const ds = createDatasource({
+    fetchFn: fakeFetch([
+      ['118.au9999', '', 500],
+      ['hq.sinajs.cn', SINA_XAU],
+    ]),
+  });
+  await assert.rejects(() => ds.fetchGoldSgePrice());
+  const g = await ds.fetchIntlGoldPrice();
+  assert.equal(g.price, 4050.91);
+  assert.equal(g.source, 'sina');
+});
+
+test('fetchIntlGoldPrice：主源连续失败 3 次进入冷却，期间直走备源不再打扰新浪', async () => {
+  const log = [];
+  const ds = createDatasource({
+    fetchFn: fakeFetch(
+      [
+        ['hq.sinajs.cn', 'x', 500],
+        ['101.GC00Y', PUSH2_INTL],
+      ],
+      log,
+    ),
+  });
+  for (let i = 0; i < 4; i++) await ds.fetchIntlGoldPrice();
+  const sinaCalls = log.filter((x) => x.url.includes('hq.sinajs.cn')).length;
+  assert.equal(sinaCalls, 3); // 第 4 次在冷却期内，不触主源
+});

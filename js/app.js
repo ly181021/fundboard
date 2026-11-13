@@ -23,10 +23,13 @@ import {
   marketStatusOf,
   marketOfIndex,
   marketPhaseOf,
+  sgePhase,
+  comexGoldPhase,
   beijingToday,
   beijingMinutes,
 } from './marketClock.js';
 import { indexMonitorCardHtml } from './components/indexMonitorCard.js';
+import { goldBlockHtml } from './components/goldCard.js';
 import {
   strategyBadgeHtml,
   strategyDetailHtml,
@@ -665,15 +668,16 @@ const app = createApp({
         strategyAlerts.value.loading = false;
       }
     }
-    // ---- 首页三区块排序 + 资产总览偏好 ----
-    // 资产总览已迁入收益页 M1，BLOCK_KEYS 收缩为 health/idx（summary 键由 parseBlockOrder 白名单兼容）
+    // ---- 首页区块排序 + 资产总览偏好 ----
+    // BLOCK_KEYS 三键＝health/idx/gold（gold＝金价区块）；已退役的 summary 键由 parseBlockOrder 白名单兼容
     const blockOrder = ref(loadBlockOrder(localStorage));
     watch(blockOrder, (v) => saveBlockOrder(localStorage, 'ui-block-order', v), { deep: true });
-    // 可见块：隐藏块（本地模式无健康条 / 无指数无指数卡）不占排序槽位，
+    // 可见块：隐藏块（本地模式无健康条与金价区块 / 无指数无指数卡）不占排序槽位，
     // 否则 ↑↓ 会与被隐藏的邻居互换——首次点击无任何视觉变化、首尾禁用态也会误判。
     const blockVisible = computed(() => ({
       health: storeMode.value === 'server',
       idx: indexes.value.length > 0,
+      gold: storeMode.value === 'server', // 金价走 /api/gold，本地模式无服务端必然取不到数据，隐藏（与 health 同判据）
     }));
 
     // ---- 视图态与 hash 路由（收益页）----
@@ -2699,6 +2703,88 @@ const app = createApp({
       });
     }
 
+    // ---- 黄金区块（上金所 Au99.99 ＋ 国际金价卡，一期）----
+    const goldSgeQuote = ref(null); // 上金所源侧行情；null=未取到（骨架屏＝加载中；失败态见 goldSgeFetchFailed）
+    const goldIntlQuote = ref(null); // 国际金价（伦敦金现 XAU/USD）
+    const goldSgeFetchFailed = ref(false); // 最近一次拉取该卡失败：有旧值→黄条＋旧值；无旧值→黄条＋「--」占位
+    const goldIntlFetchFailed = ref(false);
+    // 冷启动失败占位项：价格「--」、无涨跌、无时间戳，降级黄条不带「最近成功价」（从未成功过）
+    const GOLD_COLD_FAIL_ITEM = {
+      price: NaN,
+      change_pct: null,
+      change_amt: null,
+      time: null,
+      degraded: true,
+    };
+    function loadGold() {
+      quoteService.fetchGold().then((r) => {
+        if (r.goldSge) {
+          goldSgeQuote.value = r.goldSge;
+          goldSgeFetchFailed.value = false;
+        } else {
+          // 双源皆败：有旧值保留展示，无旧值走占位卡；骨架屏只表示加载中，不表达失败
+          goldSgeFetchFailed.value = true;
+        }
+        if (r.goldIntl) {
+          goldIntlQuote.value = r.goldIntl;
+          goldIntlFetchFailed.value = false;
+        } else {
+          goldIntlFetchFailed.value = true;
+        }
+      });
+    }
+    const goldPhase = computed(() => {
+      clockTick.value; // 30s 心跳：跨日盘/夜盘/午休边界时状态点自动迁移
+      return sgePhase(new Date(), arrivalHolidays.value);
+    });
+    const goldIntlPhase = computed(() => {
+      clockTick.value;
+      return comexGoldPhase(new Date());
+    });
+    // 黄金区块折叠：与核心指数监控同款（持久化 localStorage；排序手柄区点击不触发折叠）
+    const goldExpanded = ref(true);
+    try {
+      const goldSaved = JSON.parse(localStorage.getItem('goldBlock.expanded'));
+      if (typeof goldSaved === 'boolean') goldExpanded.value = goldSaved;
+    } catch {
+      // localStorage 禁用或损坏时保持默认展开，无需处理
+    }
+    function toggleGoldBlock(e) {
+      if (e && e.target.closest('.handles')) return;
+      goldExpanded.value = !goldExpanded.value;
+      try {
+        localStorage.setItem('goldBlock.expanded', JSON.stringify(goldExpanded.value));
+      } catch {
+        // 持久化失败只影响下次打开的初始折叠态，不影响当次切换
+      }
+    }
+    function onGoldHeadKey(e) {
+      if (e.target.closest('.handles')) return;
+      e.preventDefault();
+      toggleGoldBlock();
+    }
+    const goldHtml = computed(() => {
+      // 冷启动失败（从未取到值且最近一次拉取失败）映射为占位降级卡，骨架屏只留给加载中
+      const gold =
+        goldSgeQuote.value != null
+          ? { ...goldSgeQuote.value, degraded: goldSgeFetchFailed.value }
+          : goldSgeFetchFailed.value
+            ? GOLD_COLD_FAIL_ITEM
+            : null;
+      const intl =
+        goldIntlQuote.value != null
+          ? { ...goldIntlQuote.value, degraded: goldIntlFetchFailed.value }
+          : goldIntlFetchFailed.value
+            ? GOLD_COLD_FAIL_ITEM
+            : null;
+      return goldBlockHtml(gold, {
+        intl,
+        phase: goldPhase.value,
+        intlPhase: goldIntlPhase.value,
+        orderCtx: orderCtxOf('gold'),
+      });
+    });
+
     // 核心指数监控折叠卡：折叠状态持久化 + 三市场开市状态随轮询刷新
     const indexExpanded = ref(true);
     try {
@@ -3251,6 +3337,7 @@ const app = createApp({
       refreshStrategyAlerts(); // U1：触发历史时间线
       refreshSourceHealth(); // U1：数据源健康细条（服务端只报事实）
       loadIndexes(); // 挂载即拉一次：不依赖 A 股窗口（晚间盯纳指/恒指），也覆盖无 6 位代码持仓时 loadQuotes 提前返回的情况
+      loadGold(); // 金价卡挂载即拉一次（休市取最近行情日收盘价，夜盘时段照常）
       if (indexExpanded.value) loadIndexSparks(); // 迷你分时（折叠态不请求）
       quoteTimer = setInterval(() => {
         if (inQuoteWindow()) loadQuotes();
@@ -3258,6 +3345,11 @@ const app = createApp({
         refreshSourceHealth(); // 随行情轮询周期更新（约 60s）
         indexStatus.value = marketStatusOf(new Date(), arrivalHolidays.value); // 开市状态点随时间刷新（节假日集合就绪后 A 股假期判 closed）
         if (overseasIndexWindowOpen(new Date())) loadIndexes(); // 恒生/纳指开市时段：A 股闭市不挡指数刷新
+        if (
+          sgePhase(new Date(), arrivalHolidays.value) === 'open' ||
+          comexGoldPhase(new Date()) === 'open'
+        )
+          loadGold(); // 任一金市开市即刷新：上金所开市（含夜盘）或国际金价开市（覆盖 SGE 空档与周末前段）；两市皆休才停轮询
         if (indexExpanded.value) loadIndexSparks(); // 迷你分时随轮询刷新（折叠态静默；服务端 5 分钟子缓存兜底）
         if (estimateBoardCode.value && !curvePollSilent()) loadEstimateCurve(); // 估值盘开着才拉；午休/收盘/非交易日静默
       }, 60000);
@@ -3419,6 +3511,10 @@ const app = createApp({
       indexExpanded,
       toggleIndexMonitor,
       indexMonitorHtml,
+      goldHtml,
+      goldExpanded,
+      toggleGoldBlock,
+      onGoldHeadKey,
       indexSparks,
       loadIndexSparks,
       navDrawdown,
@@ -3587,6 +3683,12 @@ const app = createApp({
       <div v-if="viewMode === 'board'" class="blocks-wrap" @dragstart="onDragStart" @dragover.prevent @drop.prevent="onDrop" @click="onMoveClick">
         <div v-if="healthStrip" class="health-wrap blk" data-blk="health" :style="{ order: visibleOrder.indexOf('health') + 1 }" v-html="healthStrip"></div>
         <div v-if="indexes.length" class="idxm-wrap blk" data-blk="idx" :style="{ order: visibleOrder.indexOf('idx') + 1 }" :class="{ 'is-collapsed': !indexExpanded }" role="button" tabindex="0" :aria-expanded="String(indexExpanded)" aria-label="核心指数监控，点击折叠或展开" @click="toggleIndexMonitor" @keydown.enter="onIndexHeadKey" @keydown.space="onIndexHeadKey" v-html="indexMonitorHtml"></div>
+        <div v-if="storeMode === 'server'" class="goldm-wrap blk" data-blk="gold"
+          :style="{ order: visibleOrder.indexOf('gold') + 1 }" :class="{ 'is-collapsed': !goldExpanded }"
+          role="button" tabindex="0" :aria-expanded="String(goldExpanded)"
+          aria-label="黄金行情，点击折叠或展开"
+          @click="toggleGoldBlock" @keydown.enter="onGoldHeadKey" @keydown.space="onGoldHeadKey"
+          v-html="goldHtml"></div>
         <!-- 收益条：置于核心指数监控卡下方（order:3），与各卡片同一间距；👁 与收益页 M1 双入口共用；非点击跳转区块 -->
         <div class="profit-strip" style="order: 3">
           <div class="ps-main">
